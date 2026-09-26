@@ -1,0 +1,26 @@
+# lefthook.yml - Deterministic Multi-Agent Guardrails
+# Documentation: https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: false
+  commands:
+    check-drift:
+      run: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/check-drift.ps1
+
+    protect-main:
+      run: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/protect-main.ps1
+
+    detect-secrets:
+      run: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/detect-secrets.ps1
+
+    guard-tests:
+      run: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/guard-tests.ps1
+
+pre-push:
+  parallel: false
+  commands:
+    supply-chain-audit:
+      run: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/audit-dependencies.ps1
+
+    unit-tests:
+      run: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/run-tests.ps1

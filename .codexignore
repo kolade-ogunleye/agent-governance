@@ -1,0 +1,60 @@
+# Secrets & Credentials (MANDATORY SHIELD)
+.env*
+!.env.example
+*.pem
+*.key
+*.id_rsa
+*.id_ed25519
+*.pfx
+*.p12
+*.keystore
+id_rsa*
+id_ed25519*
+secrets/
+.gnupg/
+.ssh/
+
+# Local Overrides (Not shared with team/agents)
+*.local
+*.local.md
+CLAUDE.local.md
+
+# Dependencies & Environments
+node_modules/
+.venv/
+venv/
+env/
+vendor/
+
+# Build & Distribution Artifacts
+dist/
+build/
+out/
+bin/
+obj/
+*.bundle
+*.tar.gz
+*.zip
+
+# Caches & Test Outputs
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+.eslintcache
+.turbo/
+.cache/
+
+# Runtime Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.copilot/logs/
+
+# Operating System Metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

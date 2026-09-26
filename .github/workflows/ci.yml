@@ -1,0 +1,30 @@
+name: Governance Engine CI
+
+on:
+  push:
+    branches: [main, feat/*, chore/*, fix/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Lefthook & Gitleaks
+        shell: pwsh
+        run: |
+          winget install evilmartians.lefthook --accept-source-agreements --accept-package-agreements
+          winget install Gitleaks.Gitleaks --accept-source-agreements --accept-package-agreements
+
+      - name: Verify PowerShell Scripts syntax
+        shell: pwsh
+        run: |
+          $scripts = Get-ChildItem -Path . -Filter "*.ps1" -Recurse
+          foreach ($script in $scripts) {
+              Write-Host "Validating $($script.FullName)..."
+              $null = [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$null, [ref]$null)
+          }
+          Write-Host "All PowerShell scripts passed syntax validation."

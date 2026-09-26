@@ -1,0 +1,33 @@
+# Project Specification & Architecture
+
+This file contains repository-specific context, conventions, and operational runbooks. It is consulted by coding agents alongside the universal operating contract (`AGENTS.md`).
+
+---
+
+## 1. Project Overview & Tech Stack
+* **Repository Name:** <project-name>
+* **Primary Language(s):** <e.g., TypeScript / Python / Go / Rust>
+* **Framework(s):** <e.g., Next.js / FastAPI / React / Astro>
+* **Package Manager:** <e.g., pnpm / uv / cargo>
+* **Target Runtime:** <e.g., Node 22 / Python 3.12 / Linux / Cloudflare Workers>
+
+---
+
+## 2. Key Directories & Architecture Map
+* `src/`: Core application source code
+* `tests/`: Automated unit and integration test suites
+* `docs/`: Technical specifications and architecture decision records
+
+---
+
+## 3. Development Runbook & Commands
+* **Install Dependencies:** `<e.g., pnpm install>`
+* **Start Dev Server:** `<e.g., pnpm run dev>`
+* **Run Lint & Type Checks:** `<e.g., pnpm run lint; tsc --noEmit>`
+* **Run Test Suite:** `<e.g., pnpm test>`
+* **Build Project:** `<e.g., pnpm run build>`
+
+---
+
+## 4. Repository-Specific Invariants & Constraints
+* State any architectural boundaries specific to this project (e.g., *"Do not touch files in `vendor/`"*, *"All database queries go through `src/db/`"*).
