@@ -14,10 +14,12 @@ secrets/
 .gnupg/
 .ssh/
 
-# Local Overrides (Not shared with team/agents)
+# Local Overrides & Session Ledgers (Not shared with team/agents)
 *.local
 *.local.md
 CLAUDE.local.md
+WORKING.md
+.agents/state/
 
 # Dependencies & Environments
 node_modules/

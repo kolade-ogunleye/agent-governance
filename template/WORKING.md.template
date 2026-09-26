@@ -1,0 +1,28 @@
+---
+active_branch: <branch-name>
+base_commit: <short-sha>
+session_status: IN_PROGRESS
+last_updated: <iso-timestamp>
+next_action: <immediate-next-step>
+---
+
+# Session State Ledger (WORKING.md)
+
+## Objective & Intent
+
+Brief, 1-2 sentence statement of active task intent and acceptance criteria.
+
+## Completed Milestones
+
+- [ ] Initial task setup and baseline checks verified
+
+## Current In-Flight State
+
+- **Active Files:** `path/to/file.ext`
+- **Known Working Tree Changes:** Untracked or modified files
+- **Passing Verification:** Commands that have passed locally
+
+## Successor Handoff (Next Immediate Step)
+
+1. Exact terminal command or code block to execute next.
+2. Critical non-obvious context, hypotheses, or boundary conditions.

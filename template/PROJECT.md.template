@@ -19,6 +19,8 @@ This file contains repository-specific context, conventions, and operational run
 - `src/`: Core application source code
 - `tests/`: Automated unit and integration test suites
 - `docs/`: Technical specifications and architecture decision records
+- `WORKING.md`: Ephemeral session continuity ledger (local working memory, shielded from git)
+- `.agents/state/`: Branch-grounded state archive for multi-branch session persistence
 
 ---
 

@@ -21,4 +21,14 @@ if ($branch -notmatch $semanticRegex) {
     exit 1
 }
 
+# 3. Hard block: Never allow ephemeral session state ledgers into protected branches
+$stagedWorking = (git --no-pager diff --cached --name-only 2>$null) -split "`r?`n" | Where-Object { $_ -eq "WORKING.md" -or $_ -match '^\.agents/state/' }
+if ($stagedWorking) {
+    if ($branch -in @('main', 'master')) {
+        [Console]::Error.WriteLine("❌ [BLOCK] Ephemeral session ledger '$($stagedWorking -join ', ')' cannot be committed to $branch.")
+        [Console]::Error.WriteLine("👉 Session continuity ledgers must remain strictly local working memory.")
+        exit 1
+    }
+}
+
 exit 0

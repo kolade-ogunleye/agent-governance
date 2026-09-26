@@ -54,3 +54,15 @@ Before declaring any task complete, you MUST execute and report the output of:
 1. `git diff --stat` — verify only requested files were touched.
 2. Linters & Type Checks (e.g., `pnpm run lint` / `ruff check` / `tsc --noEmit`) — 0 errors required.
 3. Unit & Integration Tests (e.g., `pnpm test` / `pytest`) — 100% pass required.
+
+## 8. SESSION CONTINUITY & WRITE-AHEAD CHECKPOINTING (RFC 2119)
+
+1. **Pre-Flight Ledger Grounding:** At the start of every session, the agent MUST inspect the repository root for `WORKING.md`.
+   - **Branch & Head Validation:** Compare `active_branch` and `base_commit` against `git branch --show-current` and `git rev-parse --short HEAD`.
+   - **Branch Divergence Handling:** If `active_branch` does not match the current branch, archive `WORKING.md` to `.agents/state/<active_branch>.md` and restore `.agents/state/<current_branch>.md` (or initialize a fresh ledger).
+   - **Stale State Handling:** If `base_commit` does not match current `HEAD`, verify uncommitted working tree state before taking action.
+2. **Write-Ahead Ledger Updates:** For any multi-step task (>2 operations), the agent MUST maintain and update `WORKING.md` before pausing turns, switching major implementation phases, or when quota exhaustion is possible:
+   - Document completed milestones with passing verification commands.
+   - Record exact in-flight file state and uncommitted changes.
+   - Record the precise `next_action` command for the successor agent.
+3. **Definition of Done Cleanup:** Upon successfully passing all lint/test gates and completing the task, the agent MUST remove `WORKING.md` (or mark `session_status: COMPLETED` and archive it) so stale state does not persist into future tasks.

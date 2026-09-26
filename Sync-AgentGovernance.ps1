@@ -389,7 +389,7 @@ fi
         param([string]$targetDir)
 
         $governedFiles = @(
-            "AGENTS.md", "CLAUDE.md", "PROJECT.md",
+            "AGENTS.md", "CLAUDE.md", "PROJECT.md", "WORKING.md",
             "docs/LEGACY-AGENT-NOTES.md", ".github/copilot-instructions.md"
         ) | Where-Object { Test-Path (Join-Path $targetDir $_) }
 
@@ -474,7 +474,7 @@ fi
             if ($status) {
                 $modifiedLines = ($status -split "`r?`n") | Where-Object { $_.Trim() }
                 $nonGovChanges = $modifiedLines | Where-Object { 
-                    $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.gemini|\.github|\.gitattributes|AGENTS\.md|CLAUDE\.md|PROJECT\.md|lefthook\.yml|scripts/|docs/LEGACY-AGENT-NOTES\.md|\.claudeignore|\.codexignore)' -and
+                    $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.gemini|\.github|\.gitattributes|AGENTS\.md|CLAUDE\.md|PROJECT\.md|WORKING\.md|lefthook\.yml|scripts/|docs/LEGACY-AGENT-NOTES\.md|\.claudeignore|\.codexignore)' -and
                     $_ -notmatch '^ M (\.gitignore|\.gitattributes)' -and
                     $_ -notmatch '^ M (\.githooks|\.husky|\.git/hooks)'
                 }
@@ -503,6 +503,7 @@ fi
 
             # 3. Create target directories
             $agentsRulesDir = Join-Path $resolvedDir ".agents\rules"
+            $agentsStateDir = Join-Path $resolvedDir ".agents\state"
             $scriptsDir = Join-Path $resolvedDir "scripts\guardrails"
             $githubDir = Join-Path $resolvedDir ".github"
             $claudeDir = Join-Path $resolvedDir ".claude"
@@ -510,6 +511,7 @@ fi
             $docsDir = Join-Path $resolvedDir "docs"
 
             New-Item -ItemType Directory -Path $agentsRulesDir -Force | Out-Null
+            New-Item -ItemType Directory -Path $agentsStateDir -Force | Out-Null
             New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
             New-Item -ItemType Directory -Path $githubDir -Force | Out-Null
             New-Item -ItemType Directory -Path $claudeDir -Force | Out-Null
@@ -611,6 +613,8 @@ fi
                 $pMd.Add("## 3. Key Directories & Architecture Map")
                 $pMd.Add("")
                 $pMd.Add("- Standard repository layout. Consult existing source tree for module structure.")
+                $pMd.Add("- `WORKING.md`: Ephemeral session continuity ledger (local working memory, shielded from git).")
+                $pMd.Add("- `.agents/state/`: Branch-grounded state archive for multi-branch session persistence.")
 
                 Set-Utf8LfContent -Path $targetProjectFile -Content ($pMd -join "`n")
                 Write-Host "  ✔️ Auto-detected stack ($($stack.PrimaryStack)) and generated tailored PROJECT.md"

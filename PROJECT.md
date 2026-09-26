@@ -30,3 +30,5 @@ This repository maintains the canonical multi-agent governance standards, determ
   - `template/scripts/guardrails/`: Deterministic security scripts executed by Lefthook.
   - `template/lefthook.yml`: Deterministic hook configuration.
 - `Sync-AgentGovernance.ps1`: The orchestration and reconciliation engine.
+- `WORKING.md`: Ephemeral session continuity ledger (local working memory, shielded from git).
+- `.agents/state/`: Branch-grounded state archive for multi-branch session persistence.
