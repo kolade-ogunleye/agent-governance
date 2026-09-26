@@ -474,8 +474,8 @@ fi
             if ($status) {
                 $modifiedLines = ($status -split "`r?`n") | Where-Object { $_.Trim() }
                 $nonGovChanges = $modifiedLines | Where-Object { 
-                    $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.gemini|\.github|AGENTS\.md|CLAUDE\.md|PROJECT\.md|lefthook\.yml|scripts/guardrails|\.claudeignore|\.codexignore)' -and
-                    $_ -notmatch '^ M \.gitignore' -and
+                    $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.gemini|\.github|\.gitattributes|AGENTS\.md|CLAUDE\.md|PROJECT\.md|lefthook\.yml|scripts/|docs/LEGACY-AGENT-NOTES\.md|\.claudeignore|\.codexignore)' -and
+                    $_ -notmatch '^ M (\.gitignore|\.gitattributes)' -and
                     $_ -notmatch '^ M (\.githooks|\.husky|\.git/hooks)'
                 }
                 if ($nonGovChanges) {
