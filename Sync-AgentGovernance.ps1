@@ -374,6 +374,11 @@ fi
     function Sync-SingleRepo {
         param([string]$targetDir)
 
+        if (-not (Test-Path $targetDir)) {
+            Write-Warning "Target path does not exist: $targetDir"
+            return
+        }
+
         $resolvedDir = (Resolve-Path $targetDir).Path
         $repoName = Split-Path -Leaf $resolvedDir
 
