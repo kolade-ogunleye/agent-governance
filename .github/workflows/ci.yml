@@ -28,3 +28,12 @@ jobs:
               $null = [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$null, [ref]$null)
           }
           Write-Host "All PowerShell scripts passed syntax validation."
+
+      - name: Verify Markdown LF Line Endings & Encoding
+        shell: pwsh
+        run: |
+          ./scripts/guardrails/check-markdown.ps1
+
+      - name: Verify Prettier Markdown Formatting
+        run: |
+          npx prettier --check "**/*.md"

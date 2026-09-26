@@ -7,6 +7,9 @@ pre-commit:
     check-drift:
       run: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/check-drift.ps1
 
+    check-markdown:
+      run: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/check-markdown.ps1
+
     protect-main:
       run: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/protect-main.ps1
 

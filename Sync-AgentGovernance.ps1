@@ -61,6 +61,17 @@ function Sync-AgentGovernance {
         [switch]$Help
     )
 
+    function Set-Utf8LfContent {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$Path,
+            [Parameter(Mandatory = $true)]
+            [string]$Content
+        )
+        $normalized = ($Content -replace "\r\n", "`n").TrimEnd("`n") + "`n"
+        [System.IO.File]::WriteAllText($Path, $normalized, [System.Text.UTF8Encoding]::new($false))
+    }
+
     function Show-HelpManual {
         Write-Host @"
 
@@ -200,6 +211,9 @@ EXAMPLES:
                     if ($pkg.scripts.PSObject.Properties['dev']) { $runbook["Dev Server"] = "$pm run dev" }
                     if ($pkg.scripts.PSObject.Properties['build']) { $runbook["Build"] = "$pm run build" }
                     if ($pkg.scripts.PSObject.Properties['build:theme-assets']) { $runbook["Build Theme Assets"] = "$pm run build:theme-assets" }
+                    if ($pkg.scripts.PSObject.Properties['format']) { $runbook["Code Format"] = "$pm run format" }
+                    elseif ($pkg.scripts.PSObject.Properties['format:check']) { $runbook["Format Check"] = "$pm run format:check" }
+                    elseif ($pkg.scripts.PSObject.Properties['prettier']) { $runbook["Prettier Check"] = "$pm run prettier" }
                     if ($pkg.scripts.PSObject.Properties['lint']) { $runbook["Node Lint"] = "$pm run lint" }
                     if ($pkg.scripts.PSObject.Properties['test']) { $runbook["Node Tests"] = "$pm test" }
                     if ($pkg.scripts.PSObject.Properties['test:contracts']) { $runbook["Contract Tests"] = "$pm run test:contracts" }
@@ -371,6 +385,66 @@ fi
         }
     }
 
+    function Invoke-DownstreamFormatting {
+        param([string]$targetDir)
+
+        $governedFiles = @(
+            "AGENTS.md", "CLAUDE.md", "PROJECT.md",
+            "docs/LEGACY-AGENT-NOTES.md", ".github/copilot-instructions.md"
+        ) | Where-Object { Test-Path (Join-Path $targetDir $_) }
+
+        if ($governedFiles.Count -eq 0) { return }
+
+        # 1. Local Prettier binary in node_modules
+        $localPrettierCmd = Join-Path $targetDir "node_modules\.bin\prettier.cmd"
+        $localPrettierSh = Join-Path $targetDir "node_modules\.bin\prettier"
+        $prettierExe = if (Test-Path $localPrettierCmd) { $localPrettierCmd } elseif (Test-Path $localPrettierSh) { $localPrettierSh } else { $null }
+
+        if ($prettierExe) {
+            try {
+                Push-Location $targetDir
+                try {
+                    & $prettierExe --write $governedFiles 2>$null | Out-Null
+                    Write-Host "  ✨ Formatted governed files with local Prettier" -ForegroundColor Green
+                    return
+                } finally {
+                    Pop-Location
+                }
+            } catch {
+                # Non-blocking fallback
+            }
+        }
+
+        # 2. Local npx strictly without remote installation
+        if (Test-Path (Join-Path $targetDir "package.json")) {
+            $hasPkgPrettier = $false
+            try {
+                $pkgRaw = Get-Content (Join-Path $targetDir "package.json") -Raw | ConvertFrom-Json
+                if (($pkgRaw.devDependencies -and $pkgRaw.devDependencies.PSObject.Properties['prettier']) -or
+                    ($pkgRaw.dependencies -and $pkgRaw.dependencies.PSObject.Properties['prettier'])) {
+                    $hasPkgPrettier = $true
+                }
+            } catch {}
+
+            if ($hasPkgPrettier -and (Get-Command npx -ErrorAction SilentlyContinue)) {
+                try {
+                    Push-Location $targetDir
+                    try {
+                        & npx --no-install prettier --write $governedFiles 2>$null | Out-Null
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-Host "  ✨ Formatted governed files with local Prettier (npx offline)" -ForegroundColor Green
+                            return
+                        }
+                    } finally {
+                        Pop-Location
+                    }
+                } catch {
+                    # Non-blocking fallback
+                }
+            }
+        }
+    }
+
     function Sync-SingleRepo {
         param([string]$targetDir)
 
@@ -453,7 +527,7 @@ fi
                     New-Item -ItemType Directory -Path $docsDir -Force | Out-Null
                     $backupPath = Join-Path $docsDir "LEGACY-AGENT-NOTES.md"
                     if (-not (Test-Path $backupPath)) {
-                        Set-Content -Path $backupPath -Value $currentContent -Encoding utf8
+                        Set-Utf8LfContent -Path $backupPath -Content $currentContent
                         $hasPreservedLegacy = $true
                         Write-Host "  🛡️ Preserved pre-existing custom AGENTS.md into docs/LEGACY-AGENT-NOTES.md"
                     }
@@ -464,7 +538,7 @@ fi
                     New-Item -ItemType Directory -Path $docsDir -Force | Out-Null
                     $backupPath = Join-Path $docsDir "LEGACY-AGENT-NOTES.md"
                     if (-not (Test-Path $backupPath)) {
-                        Set-Content -Path $backupPath -Value $currentClaude -Encoding utf8
+                        Set-Utf8LfContent -Path $backupPath -Content $currentClaude
                         $hasPreservedLegacy = $true
                         Write-Host "  🛡️ Preserved pre-existing custom CLAUDE.md into docs/LEGACY-AGENT-NOTES.md"
                     }
@@ -501,6 +575,7 @@ fi
                     $pMd.Add("---")
                     $pMd.Add("")
                     $pMd.Add("## 0. Legacy & Historical Agent Instructions")
+                    $pMd.Add("")
                     $pMd.Add("> [!NOTE]")
                     $pMd.Add("> Pre-existing custom repository instructions were archived to [`docs/LEGACY-AGENT-NOTES.md`](docs/LEGACY-AGENT-NOTES.md).")
                     $pMd.Add("> Agents MUST consult this document for historical architectural context, design decisions, and domain conventions.")
@@ -510,31 +585,34 @@ fi
                 $pMd.Add("---")
                 $pMd.Add("")
                 $pMd.Add("## 1. Project Overview & Tech Stack")
-                $pMd.Add("* **Repository Name:** $($stack.Name)")
-                $pMd.Add("* **Detected Stack:** $($stack.PrimaryStack)")
-                $pMd.Add("* **Frameworks / Platforms:** $(if ($stack.Frameworks) { $stack.Frameworks } else { 'Standard / Native' })")
-                $pMd.Add("* **Package Manager(s):** $(if ($stack.PackageManagers) { $stack.PackageManagers } else { 'None detected' })")
+                $pMd.Add("")
+                $pMd.Add("- **Repository Name:** $($stack.Name)")
+                $pMd.Add("- **Detected Stack:** $($stack.PrimaryStack)")
+                $pMd.Add("- **Frameworks / Platforms:** $(if ($stack.Frameworks) { $stack.Frameworks } else { 'Standard / Native' })")
+                $pMd.Add("- **Package Manager(s):** $(if ($stack.PackageManagers) { $stack.PackageManagers } else { 'None detected' })")
                 $pMd.Add("")
                 $pMd.Add("---")
                 $pMd.Add("")
                 $pMd.Add("## 2. Development Runbook & Commands")
+                $pMd.Add("")
 
                 if ($stack.Runbook.Count -gt 0) {
                     foreach ($key in $stack.Runbook.Keys) {
                         $val = $stack.Runbook[$key]
-                        $pMd.Add("* **$($key):** " + '`' + $val + '`')
+                        $pMd.Add("- **$($key):** " + '`' + $val + '`')
                     }
                 } else {
-                    $pMd.Add("* Document local start, lint, and test commands here.")
+                    $pMd.Add("- Document local start, lint, and test commands here.")
                 }
 
                 $pMd.Add("")
                 $pMd.Add("---")
                 $pMd.Add("")
                 $pMd.Add("## 3. Key Directories & Architecture Map")
-                $pMd.Add("* Standard repository layout. Consult existing source tree for module structure.")
+                $pMd.Add("")
+                $pMd.Add("- Standard repository layout. Consult existing source tree for module structure.")
 
-                Set-Content -Path $targetProjectFile -Value ($pMd -join "`r`n") -Encoding utf8
+                Set-Utf8LfContent -Path $targetProjectFile -Content ($pMd -join "`n")
                 Write-Host "  ✔️ Auto-detected stack ($($stack.PrimaryStack)) and generated tailored PROJECT.md"
             }
 
@@ -556,7 +634,8 @@ fi
                     }
                 }
                 if ($missingEntries.Count -gt 0) {
-                    Add-Content -Path $targetGitignore -Value ("`n# Added by Agent Governance`n" + ($missingEntries -join "`n"))
+                    $newIgnore = $existingIgnore.TrimEnd() + "`n`n# Added by Agent Governance`n" + ($missingEntries -join "`n") + "`n"
+                    Set-Utf8LfContent -Path $targetGitignore -Content $newIgnore
                     Write-Host "  ✔️ Added $($missingEntries.Count) missing shield rules to .gitignore"
                 }
             } else {
@@ -564,10 +643,35 @@ fi
                 Write-Host "  ✔️ Initialized .gitignore from canonical shield"
             }
 
+            # 9. Merge .gitattributes non-destructively
+            $targetGitattrs = Join-Path $resolvedDir ".gitattributes"
+            $hubGitattrs = Join-Path $hubDir ".gitattributes"
+            if (Test-Path $hubGitattrs) {
+                if (Test-Path $targetGitattrs) {
+                    $existingAttrs = Get-Content $targetGitattrs -Raw
+                    $hubAttrs = Get-Content $hubGitattrs -Raw
+                    $missingAttrs = @()
+                    foreach ($line in ($hubAttrs -split "`r?`n")) {
+                        $trimmed = $line.Trim()
+                        if ($trimmed -and -not ($trimmed.StartsWith("#")) -and -not ($existingAttrs -match [regex]::Escape($trimmed))) {
+                            $missingAttrs += $trimmed
+                        }
+                    }
+                    if ($missingAttrs.Count -gt 0) {
+                        $newAttrs = $existingAttrs.TrimEnd() + "`n`n# Added by Agent Governance`n" + ($missingAttrs -join "`n") + "`n"
+                        Set-Utf8LfContent -Path $targetGitattrs -Content $newAttrs
+                        Write-Host "  ✔️ Added $($missingAttrs.Count) missing attributes to .gitattributes"
+                    }
+                } else {
+                    Copy-Item $hubGitattrs $targetGitattrs -Force
+                    Write-Host "  ✔️ Initialized .gitattributes from canonical shield"
+                }
+            }
+
             New-Item -ItemType HardLink -Path (Join-Path $resolvedDir ".claudeignore") -Target $targetGitignore -Force | Out-Null
             New-Item -ItemType HardLink -Path (Join-Path $resolvedDir ".codexignore") -Target $targetGitignore -Force | Out-Null
 
-            # 9. Directory junctions for native tool auto-injection
+            # 10. Directory junctions for native tool auto-injection
             $claudeRules = Join-Path $claudeDir "rules"
             $geminiRules = Join-Path $geminiDir "rules"
             if (-not (Test-Path $claudeRules)) {
@@ -577,10 +681,13 @@ fi
                 New-Item -ItemType Junction -Path $geminiRules -Target $agentsRulesDir -Force | Out-Null
             }
 
-            # 10. Intelligent Git Hook Reconciliation
+            # 11. Intelligent Git Hook Reconciliation
             Reconcile-GitHooks -targetDir $resolvedDir
 
-            # 11. Optional Safe Branching and Conventional Commits
+            # 12. Scoped Downstream Formatter Execution
+            Invoke-DownstreamFormatting -targetDir $resolvedDir
+
+            # 13. Optional Safe Branching and Conventional Commits
             if ($BranchAndCommit) {
                 $govStatus = (git --no-pager status --porcelain)
                 if ($govStatus) {
@@ -597,7 +704,7 @@ fi
                     $stageItems = @(
                         "AGENTS.md", "CLAUDE.md", "PROJECT.md", "lefthook.yml",
                         ".agents", ".claude", ".gemini", ".github",
-                        ".gitignore", ".claudeignore", ".codexignore",
+                        ".gitignore", ".gitattributes", ".claudeignore", ".codexignore",
                         "scripts/guardrails", "docs/LEGACY-AGENT-NOTES.md"
                     )
                     foreach ($item in $stageItems) {

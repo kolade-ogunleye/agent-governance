@@ -1,0 +1,10 @@
+# Git attributes for repository text normalization
+# Ensure all text files, especially Markdown and scripts, use LF newlines across Windows and Unix platforms
+
+* text=auto eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf

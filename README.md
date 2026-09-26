@@ -39,6 +39,7 @@ flowchart TD
 The engine is loaded into your PowerShell profile (`$PROFILE`) and provides rich subcommands and short parameter switches.
 
 ### CLI Syntax:
+
 ```powershell
 Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
                      [-RepoPath|-r <path>]
@@ -50,42 +51,47 @@ Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
 
 ### Subcommands & Common Commands:
 
-| Command | Short Alias | Description |
-| :--- | :--- | :--- |
-| `Sync-AgentGovernance` | `Sync-AgentGovernance sync` | Reconciles governance in current directory. |
-| `Sync-AgentGovernance -h` | `Sync-AgentGovernance help` | Displays the interactive CLI reference manual. |
-| `Sync-AgentGovernance status` | — | Inspects Central Hub health, active rules, and guardrails. |
-| `Sync-AgentGovernance audit -a` | `Sync-AgentGovernance -All -AuditOnly` | Performs a read-only audit across all repositories. |
+| Command                            | Short Alias                             | Description                                                           |
+| :--------------------------------- | :-------------------------------------- | :-------------------------------------------------------------------- |
+| `Sync-AgentGovernance`             | `Sync-AgentGovernance sync`             | Reconciles governance in current directory.                           |
+| `Sync-AgentGovernance -h`          | `Sync-AgentGovernance help`             | Displays the interactive CLI reference manual.                        |
+| `Sync-AgentGovernance status`      | —                                       | Inspects Central Hub health, active rules, and guardrails.            |
+| `Sync-AgentGovernance audit -a`    | `Sync-AgentGovernance -All -AuditOnly`  | Performs a read-only audit across all repositories.                   |
 | `Sync-AgentGovernance -r <dir> -c` | `Sync-AgentGovernance -BranchAndCommit` | Syncs target repo, branches to `chore/agent-governance`, and commits. |
-| `Sync-AgentGovernance -a -c` | — | Fleet-wide safe sync and automated commit across all clean repos. |
+| `Sync-AgentGovernance -a -c`       | —                                       | Fleet-wide safe sync and automated commit across all clean repos.     |
 
 ---
 
 ## ⚡ Core Capabilities
 
 ### 1. The Lean Universal Contract & Dual-Contract Layering
-* Root [`AGENTS.md`](template/AGENTS.md) is kept ultra-lean (<80 lines) to prevent context diffusion and token exhaustion.
-* **Precedence:** Universal operating rules (branch semantics, conventional commits, secret shielding, test anti-tampering) hold absolute veto power.
-* **Domain Memory:** Pre-existing custom agent instructions in existing repositories are automatically archived into `docs/LEGACY-AGENT-NOTES.md` and cited as mandatory domain logic in `PROJECT.md`.
+
+- Root [`AGENTS.md`](template/AGENTS.md) is kept ultra-lean (<80 lines) to prevent context diffusion and token exhaustion.
+- **Precedence:** Universal operating rules (branch semantics, conventional commits, secret shielding, test anti-tampering) hold absolute veto power.
+- **Domain Memory:** Pre-existing custom agent instructions in existing repositories are automatically archived into `docs/LEGACY-AGENT-NOTES.md` and cited as mandatory domain logic in `PROJECT.md`.
 
 ### 2. Intelligent Git Hook Chaining
-* Detects custom `core.hooksPath` configurations (e.g. `.githooks/` or `.husky/`).
-* Scans backward from terminal `exit 0` statements and inserts Lefthook chains non-destructively.
-* Automatically resolves external hook paths to keep repositories strictly isolated.
+
+- Detects custom `core.hooksPath` configurations (e.g. `.githooks/` or `.husky/`).
+- Scans backward from terminal `exit 0` statements and inserts Lefthook chains non-destructively.
+- Automatically resolves external hook paths to keep repositories strictly isolated.
 
 ### 3. Automated Hub Drift Detection
-* Pre-commit checks SHA256 hashes of local rules against the Central Hub.
-* If updates are committed to `agent-governance`, downstream repositories immediately notify developers:
+
+- Pre-commit checks SHA256 hashes of local rules against the Central Hub.
+- If updates are committed to `agent-governance`, downstream repositories immediately notify developers:
   ```
   ⚡ [Agent Governance] Local repository rules have drifted from the Central Hub.
      Run 'Sync-AgentGovernance' to synchronize with latest corporate standards.
   ```
 
 ### 4. Lockfile-Aware Polyglot Detection
-* Inspects repository manifests (`package.json`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `pyproject.toml`, `uv.lock`, `Cargo.toml`, `go.mod`, `ansible/`, `*.ps1`).
-* Tailors `PROJECT.md` runbooks and executes exact project-native package managers during supply-chain audits and test runs.
+
+- Inspects repository manifests (`package.json`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `pyproject.toml`, `uv.lock`, `Cargo.toml`, `go.mod`, `ansible/`, `*.ps1`).
+- Tailors `PROJECT.md` runbooks and executes exact project-native package managers during supply-chain audits and test runs.
 
 ---
 
 ## 📄 License
+
 MIT License.
