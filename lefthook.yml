@@ -2,7 +2,8 @@
 # Documentation: https://github.com/evilmartians/lefthook
 
 pre-commit:
-  parallel: false
+  # The guardrails are independent read-only checks; running them concurrently saves ~4s per commit.
+  parallel: true
   commands:
     check-drift:
       run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/guardrails/check-drift.ps1
