@@ -153,9 +153,77 @@ function Sync-AgentGovernance {
         foreach ($optional in @('PROJECT.md', '.claude/settings.json', '.gemini/settings.json', '.agent-governance.lock')) {
             if (-not (Test-Path -LiteralPath (Join-Path $TargetDir $optional))) { $plan.Add("create  $optional") }
         }
+        $caller = Get-CallerWorkflow -HubDir $HubDir -RepoDir $TargetDir
+        if ($caller.Content) {
+            $callerPath = Join-Path $TargetDir '.github' 'workflows' 'agent-governance.yml'
+            if (-not (Test-Path -LiteralPath $callerPath)) { $plan.Add("create  .github/workflows/agent-governance.yml") }
+            elseif (([System.IO.File]::ReadAllText($callerPath) -replace "`r`n", "`n") -ne $caller.Content) { $plan.Add("update  .github/workflows/agent-governance.yml") }
+        } else {
+            $plan.Add("skip    .github/workflows/agent-governance.yml ($($caller.Reason))")
+        }
+        $eol = Get-EolRenormalizeCandidate -RepoDir $TargetDir
+        if ($eol.Count -gt 0) { $plan.Add("renormalize line endings in $($eol.Count) file(s)") }
         $plan.Add("merge   .gitignore / .gitattributes (missing canonical entries only)")
         $plan.Add("chain   git pre-commit / pre-push hooks")
         return , $plan.ToArray()
+    }
+
+    function Get-EolRenormalizeCandidate {
+        [OutputType([string[]])]
+        param([Parameter(Mandatory = $true)][string]$RepoDir)
+        # Tracked files stored with CRLF (or mixed) although .gitattributes requires eol=lf. Fresh clones
+        # show these as modified until they are renormalized.
+        $candidates = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in @(git -C $RepoDir -c core.quotepath=off ls-files --eol)) {
+            $parts = "$line" -split "`t", 2
+            if ($parts.Count -eq 2 -and $parts[0] -match '^i/(crlf|mixed)\s' -and $parts[0] -match '\beol=lf\b') {
+                $candidates.Add($parts[1])
+            }
+        }
+        return , $candidates.ToArray()
+    }
+
+    function Test-EolOnlyChange {
+        [OutputType([bool])]
+        param(
+            [Parameter(Mandatory = $true)][string]$RepoDir,
+            [Parameter(Mandatory = $true)][string]$Path
+        )
+        # True when the working-tree difference consists only of line-ending changes.
+        & git -C $RepoDir -c core.quotepath=off diff --quiet --ignore-cr-at-eol -- $Path 2>$null
+        return ($LASTEXITCODE -eq 0)
+    }
+
+    function Get-CallerWorkflow {
+        [OutputType([pscustomobject])]
+        param(
+            [Parameter(Mandatory = $true)][string]$HubDir,
+            [Parameter(Mandatory = $true)][string]$RepoDir
+        )
+        # Renders the managed caller workflow pinned to the hub commit. Returns Content = $null plus a
+        # Reason when the pin would not be fetchable by downstream CI.
+        $hubRepoRoot = Split-Path -Parent $HubDir
+        $commit = "$(git -C $hubRepoRoot rev-parse HEAD 2>$null)".Trim()
+        if ($commit -notmatch '^[0-9a-f]{40}$') { return [pscustomobject]@{ Content = $null; Reason = 'the hub is not a git checkout' } }
+        $templateChanges = "$(git -C $hubRepoRoot status --porcelain -- template 2>$null)".Trim()
+        if ($templateChanges) {
+            return [pscustomobject]@{ Content = $null; Reason = 'the hub template has uncommitted changes' }
+        }
+        $remoteBranches = "$(git -C $hubRepoRoot branch -r --contains $commit 2>$null)".Trim()
+        if (-not $remoteBranches) {
+            return [pscustomobject]@{ Content = $null; Reason = "hub commit $($commit.Substring(0, 7)) is not pushed" }
+        }
+        $originUrl = "$(git -C $hubRepoRoot remote get-url origin 2>$null)".Trim()
+        if ($originUrl -notmatch 'github\.com[:/]([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(\.git)?/?$') {
+            return [pscustomobject]@{ Content = $null; Reason = 'the hub origin is not a GitHub repository' }
+        }
+        $hubRepository = "$($Matches[1])/$($Matches[2])"
+        $defaultBranch = "$(git -C $RepoDir symbolic-ref --short refs/remotes/origin/HEAD 2>$null)".Trim() -replace '^origin/', ''
+        if ($defaultBranch -notmatch '^[A-Za-z0-9._/-]+$') { $defaultBranch = 'main' }
+
+        $template = [System.IO.File]::ReadAllText((Join-Path $HubDir '.github' 'workflows' 'agent-governance.yml'))
+        $content = $template.Replace('__HUB_REPOSITORY__', $hubRepository).Replace('__HUB_COMMIT__', $commit).Replace('__DEFAULT_BRANCH__', $defaultBranch)
+        return [pscustomobject]@{ Content = $content; Reason = $null }
     }
 
     function Show-HelpManual {
@@ -430,7 +498,9 @@ EXAMPLES:
                 $hookDir = $candidate
             }
         } else {
-            $hookDir = Join-Path $targetDir ".git\hooks"
+            # Worktree-safe: in a linked worktree .git is a file and hooks live in the common git dir.
+            $hookDir = "$(git -C $targetDir rev-parse --path-format=absolute --git-path hooks)".Trim()
+            if ($LASTEXITCODE -ne 0 -or -not $hookDir) { throw 'Could not resolve the git hooks directory.' }
         }
 
         if (-not (Test-Path $hookDir)) {
@@ -613,7 +683,9 @@ fi
                 $nonGovChanges = $modifiedLines | Where-Object { 
                     $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.gemini|\.github|\.gitattributes|\.gitignore|AGENTS\.md|CLAUDE\.md|PROJECT\.md|WORKING\.md|lefthook\.yml|scripts/|docs/LEGACY-AGENT-NOTES\.md|\.agent-governance\.lock)' -and
                     $_ -notmatch '^ M (\.gitignore|\.gitattributes)' -and
-                    $_ -notmatch '^ M (\.githooks|\.husky|\.git/hooks)'
+                    $_ -notmatch '^ M (\.githooks|\.husky|\.git/hooks)' -and
+                    # Line-ending-only drift (CRLF stored despite eol=lf) is renormalized by the sync, not project work.
+                    -not ($_ -match '^ M (.+)$' -and (Test-EolOnlyChange -RepoDir $resolvedDir -Path $Matches[1].Trim('"')))
                 }
                 if ($nonGovChanges) {
                     Write-Warning "⚠️ SKIPPED: Repository has uncommitted changes in project code:"
@@ -736,6 +808,22 @@ fi
                 Write-Host "  ✔️ Installed Claude Code secret deny rules and Bash guard hook (.claude/settings.json)"
             } elseif ((Get-Content $targetClaudeSettings -Raw) -notmatch 'agent-bash-guard\.ps1') {
                 Write-Warning "Kept existing .claude/settings.json; merge template/.claude/settings.json into it to enable agent guardrails."
+            }
+
+            # 5c. Server-side gate: managed caller workflow pinned to a pushed, clean hub commit.
+            # A same-named file without the managed marker belongs to the team and is never replaced.
+            $callerWorkflowPath = Join-Path $githubDir "workflows" "agent-governance.yml"
+            $callerWorkflow = Get-CallerWorkflow -HubDir $hubDir -RepoDir $resolvedDir
+            $callerIsManaged = -not (Test-Path -LiteralPath $callerWorkflowPath) -or
+                ([System.IO.File]::ReadAllText($callerWorkflowPath) -match '(?m)^# Managed by agent-governance')
+            if (-not $callerIsManaged) {
+                Write-Warning "Kept existing unmanaged .github/workflows/agent-governance.yml; rename it to let the sync manage the governance gate."
+            } elseif (-not $callerWorkflow.Content) {
+                Write-Warning "Did not update .github/workflows/agent-governance.yml: $($callerWorkflow.Reason). Push the hub and re-sync."
+            } else {
+                New-Item -ItemType Directory -Path (Split-Path -Parent $callerWorkflowPath) -Force | Out-Null
+                Set-Utf8LfContent -Path $callerWorkflowPath -Content $callerWorkflow.Content
+                Write-Host "  ✔️ Pinned governance gate workflow to the hub commit (.github/workflows/agent-governance.yml)"
             }
 
             # 6. Auto-detect stack & generate rich PROJECT.md if missing or unpopulated
@@ -955,6 +1043,9 @@ fi
                     $lockFiles[$file.Target] = Get-NormalizedHash -Path $managedPath
                 }
             }
+            if ((Test-Path -LiteralPath $callerWorkflowPath) -and ([System.IO.File]::ReadAllText($callerWorkflowPath) -match '(?m)^# Managed by agent-governance')) {
+                $lockFiles['.github/workflows/agent-governance.yml'] = Get-NormalizedHash -Path $callerWorkflowPath
+            }
             $lockDocument = [ordered]@{
                 version = 1
                 hub     = [ordered]@{ commit = $(if ($hubCommit) { $hubCommit } else { $null }); dirty = $hubDirty }
@@ -965,8 +1056,34 @@ fi
             $lockJson = ($lockDocument | ConvertTo-Json -Depth 5) -replace '(: )"([0-9a-f]{64})"', ":`n      `"`$2`""
             Set-Utf8LfContent -Path $lockPath -Content $lockJson
 
+            # 12c. Line endings: files stored with CRLF although .gitattributes requires LF.
+            $eolCandidates = Get-EolRenormalizeCandidate -RepoDir $resolvedDir
+            if ($eolCandidates.Count -gt 0 -and -not $BranchAndCommit) {
+                Write-Warning "$($eolCandidates.Count) tracked file(s) are stored with CRLF although .gitattributes requires LF. Normalize them in their own commit: git add --renormalize . && git commit -m 'chore: renormalize line endings to match .gitattributes'"
+            }
+
             # 13. Optional Safe Conventional Commits
             if ($BranchAndCommit) {
+                if ($eolCandidates.Count -gt 0) {
+                    # Content-neutral, separate commit so the governance diff stays reviewable.
+                    $pathspecFile = [System.IO.Path]::GetTempFileName()
+                    try {
+                        [System.IO.File]::WriteAllText($pathspecFile, ($eolCandidates -join "`0") + "`0")
+                        git -c core.quotepath=off add --renormalize --pathspec-from-file=$pathspecFile --pathspec-file-nul
+                        if ($LASTEXITCODE -ne 0) { throw 'Failed to stage line-ending renormalization.' }
+                    } finally {
+                        Remove-Item -LiteralPath $pathspecFile -Force -ErrorAction SilentlyContinue
+                    }
+                    git --no-pager diff --cached --quiet --ignore-cr-at-eol
+                    if ($LASTEXITCODE -ne 0) {
+                        git reset -q
+                        throw 'Renormalization staged content changes beyond line endings; nothing was committed.'
+                    }
+                    git commit -m "chore: renormalize line endings to match .gitattributes" | Out-Null
+                    if ($LASTEXITCODE -ne 0) { throw 'Line-ending renormalization commit failed; changes remain staged for review.' }
+                    Write-Host "  ✅ Committed line-ending renormalization for $($eolCandidates.Count) file(s)" -ForegroundColor Green
+                }
+
                 $govStatus = (git --no-pager status --porcelain)
                 if ($govStatus) {
 

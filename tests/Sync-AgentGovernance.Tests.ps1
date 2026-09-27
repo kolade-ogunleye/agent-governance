@@ -100,6 +100,54 @@ Describe 'Sync-AgentGovernance' {
         git -C $Repo log -1 --format=%s | Should -Be 'chore(governance): install unified agent contract and deterministic guardrails'
     }
 
+    Context 'rollout findings' {
+        It 'installs the governance gate in a linked worktree (hooks live in the common git dir)' {
+            $worktree = Join-Path $TestDrive ("wt-" + [guid]::NewGuid().ToString('N'))
+            git -C $Repo worktree add -q -b chore/worktree-sync $worktree
+            (Get-Item -LiteralPath (Join-Path $worktree '.git') -Force).PSIsContainer | Should -BeFalse
+
+            Invoke-QuietSync -RepoPath $worktree
+
+            Join-Path $worktree 'AGENTS.md' | Should -Exist
+            (Get-Content (Join-Path $Repo '.git/hooks/pre-commit') -Raw) | Should -Match '# >>> agent-governance'
+        }
+
+        Context 'line endings stored as CRLF despite eol=lf' {
+            BeforeEach {
+                # A CRLF file committed before .gitattributes existed, then eol=lf added: the fresh-clone state.
+                [System.IO.File]::WriteAllBytes((Join-Path $Repo 'legacy.ps1'), [System.Text.Encoding]::UTF8.GetBytes("Write-Output 1`r`nWrite-Output 2`r`n"))
+                git -C $Repo -c core.autocrlf=false add legacy.ps1
+                git -C $Repo -c core.hooksPath=.git/no-hooks commit --quiet -m 'chore: add crlf file'
+                [System.IO.File]::WriteAllText((Join-Path $Repo '.gitattributes'), "* text=auto eol=lf`n")
+                git -C $Repo add .gitattributes
+                git -C $Repo -c core.hooksPath=.git/no-hooks commit --quiet -m 'chore: require lf'
+                # Rewrite identical bytes so git re-inspects the file and reports the phantom modification.
+                [System.IO.File]::WriteAllBytes((Join-Path $Repo 'legacy.ps1'), [System.IO.File]::ReadAllBytes((Join-Path $Repo 'legacy.ps1')))
+            }
+
+            It 'does not treat line-ending-only drift as uncommitted project work' {
+                Invoke-QuietSync -RepoPath $Repo
+
+                Join-Path $Repo 'AGENTS.md' | Should -Exist
+            }
+
+            It 'with -BranchAndCommit, renormalizes in its own content-neutral commit' {
+                Invoke-QuietSync -RepoPath $Repo -BranchAndCommit
+
+                (git -C $Repo -c core.quotepath=off ls-files --eol -- legacy.ps1) | Should -Match '^i/lf\s'
+                @(git -C $Repo log --format=%s -2) | Should -Contain 'chore: renormalize line endings to match .gitattributes'
+                git -C $Repo status --porcelain | Should -BeNullOrEmpty
+            }
+
+            It 'without -BranchAndCommit, warns and leaves the index untouched' {
+                $warnings = Sync-AgentGovernance -RepoPath $Repo 6>$null 3>&1 | ForEach-Object { "$_" }
+
+                ($warnings -join "`n") | Should -Match 'renormalize'
+                (git -C $Repo -c core.quotepath=off ls-files --eol -- legacy.ps1) | Should -Match '^i/crlf\s'
+            }
+        }
+    }
+
     Context 'plan Phase 6 progressive disclosure' {
         It 'deploys every path-scoped language rule to .agents/rules and .claude/rules' {
             Invoke-QuietSync -RepoPath $Repo

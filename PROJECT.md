@@ -32,6 +32,7 @@ This repository maintains the canonical multi-agent governance standards, determ
   - `template/.agents/rules/`: Always-loaded `languages.md` index and `security-performance.md`, plus path-scoped `lang-*.md` rules.
   - `template/scripts/guardrails/`: Deterministic security scripts executed by Lefthook.
   - `template/lefthook.yml`: Deterministic hook configuration.
+  - `template/.github/workflows/agent-governance.yml`: Caller workflow for the governance gate; sync renders it with the hub repository and pushed hub commit.
   - `template/.claude/settings.json`: Claude Code secret deny rules + PreToolUse Bash guard (deployed only when a repo has none).
 - `Sync-AgentGovernance.ps1`: The orchestration and reconciliation engine.
 - `Set-GovernanceRuleset.ps1` + `rulesets/`: Server-side default-branch ruleset (non-bypassable layer). Dry-run first: `./Set-GovernanceRuleset.ps1 -Repository owner/name -WhatIf`.

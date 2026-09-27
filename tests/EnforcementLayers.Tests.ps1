@@ -125,6 +125,89 @@ Describe 'Governance gate workflow' {
     }
 }
 
+Describe 'Governance gate secret-scan range selection' {
+    BeforeAll {
+        # Extract the shipped run block of the "Scan for secrets" step, so the test exercises the real script.
+        $lines = Get-Content (Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml')
+        $step = [array]::FindIndex([string[]]$lines, [Predicate[string]] { param($l) $l -match '^\s+- name: Scan for secrets\s*$' })
+        $runIdx = $step + 1
+        while ($lines[$runIdx] -notmatch '^\s+run: \|\s*$') { $runIdx++ }
+        $indent = ($lines[$runIdx + 1] -replace '^(\s*).*', '$1').Length
+        $body = [System.Collections.Generic.List[string]]::new()
+        for ($i = $runIdx + 1; $i -lt $lines.Count -and ($lines[$i] -eq '' -or ($lines[$i] -replace '^(\s*).*', '$1').Length -ge $indent); $i++) {
+            $body.Add($(if ($lines[$i].Length -ge $indent) { $lines[$i].Substring($indent) } else { '' }))
+        }
+        $script:ScanScript = Join-Path $TestDrive 'scan-for-secrets.sh'
+        [System.IO.File]::WriteAllText($ScanScript, ($body -join "`n") + "`n")
+
+        # Git's own bash on Windows (a bare 'bash' may resolve to WSL); system bash elsewhere.
+        $script:Bash = 'bash'
+        if ($IsWindows) {
+            # git.exe may live in <Git>\cmd or <Git>\mingw64\bin; walk up to the Git root that has bin\bash.exe.
+            $dir = Split-Path -Parent (Get-Command git -CommandType Application | Select-Object -First 1).Source
+            while ($dir -and -not (Test-Path (Join-Path $dir 'bin' 'bash.exe'))) { $dir = Split-Path -Parent $dir }
+            if (-not $dir) { throw 'Git for Windows bash.exe not found.' }
+            $script:Bash = Join-Path $dir 'bin' 'bash.exe'
+        }
+
+        $script:Repo = New-TestRepo -Path (Join-Path $TestDrive 'scan-repo')
+        Add-FixtureCommit -RepoPath $Repo -Files @{ 'a.txt' = "a`n" }
+        Add-FixtureCommit -RepoPath $Repo -Files @{ 'b.txt' = "b`n" }
+        $script:Shas = @(git -C $Repo rev-list --reverse HEAD)
+
+        $script:ShimDir = Join-Path $TestDrive 'scan-shims'
+        New-Item -ItemType Directory -Path $ShimDir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $ShimDir 'gitleaks'), "#!/bin/sh`necho `"`$*`" > `"`$GITLEAKS_ARGS_FILE`"`n")
+
+        function Invoke-ScanStep {
+            param([hashtable]$EventEnv)
+            $argsFile = Join-Path $TestDrive ("args-" + [guid]::NewGuid().ToString('N') + '.txt')
+            $saved = @{}
+            $vars = @{ EVENT_NAME = ''; FULL_HISTORY = 'false'; PR_BASE_SHA = ''; PR_HEAD_SHA = ''; PUSH_BEFORE_SHA = ''; PUSH_AFTER_SHA = '' }
+            foreach ($k in $EventEnv.Keys) { $vars[$k] = $EventEnv[$k] }
+            $vars['GITLEAKS_ARGS_FILE'] = $argsFile
+            foreach ($k in $vars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, [string]$vars[$k]) }
+            $shimPosix = if ($IsWindows) { & $Bash -c "cygpath -u '$ShimDir'" } else { $ShimDir }
+            Push-Location $Repo
+            try {
+                & $Bash -c "export PATH='${shimPosix}':`"`$PATH`"; chmod +x '${shimPosix}/gitleaks'; bash '$(if ($IsWindows) { & $Bash -c "cygpath -u '$ScanScript'" } else { $ScanScript })'" | Out-Null
+                $exit = $LASTEXITCODE
+            } finally {
+                Pop-Location
+                foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
+            }
+            return [pscustomobject]@{ ExitCode = $exit; Args = (Get-Content $argsFile -Raw -ErrorAction SilentlyContinue) }
+        }
+    }
+
+    It 'scans only the pull request range' {
+        $r = Invoke-ScanStep @{ EVENT_NAME = 'pull_request'; PR_BASE_SHA = $Shas[0]; PR_HEAD_SHA = $Shas[2] }
+        $r.ExitCode | Should -Be 0
+        $r.Args | Should -Match ([regex]::Escape("--log-opts=$($Shas[0])..$($Shas[2])"))
+    }
+
+    It 'scans only the pushed range' {
+        $r = Invoke-ScanStep @{ EVENT_NAME = 'push'; PUSH_BEFORE_SHA = $Shas[1]; PUSH_AFTER_SHA = $Shas[2] }
+        $r.Args | Should -Match ([regex]::Escape("--log-opts=$($Shas[1])..$($Shas[2])"))
+    }
+
+    It 'falls back to full history when <Case>' -ForEach @(
+        @{ Case = 'a new branch is pushed (zero before-SHA)'; Env = @{ EVENT_NAME = 'push'; PUSH_BEFORE_SHA = ('0' * 40) } }
+        @{ Case = 'the before-SHA is missing after a force-push'; Env = @{ EVENT_NAME = 'push'; PUSH_BEFORE_SHA = ('a' * 40) } }
+        @{ Case = 'the run is scheduled'; Env = @{ EVENT_NAME = 'schedule' } }
+        @{ Case = 'full_history_secret_scan is requested'; Env = @{ EVENT_NAME = 'pull_request'; FULL_HISTORY = 'true' } }
+        @{ Case = 'a SHA value is malformed'; Env = @{ EVENT_NAME = 'pull_request'; PR_BASE_SHA = '$(touch pwned)'; PR_HEAD_SHA = 'x;touch pwned' } }
+    ) {
+        if ($Env.ContainsKey('PUSH_BEFORE_SHA')) { $Env['PUSH_AFTER_SHA'] = $Shas[2] }
+        if ($Env['EVENT_NAME'] -eq 'pull_request' -and -not $Env.ContainsKey('PR_BASE_SHA')) { $Env['PR_BASE_SHA'] = $Shas[0]; $Env['PR_HEAD_SHA'] = $Shas[2] }
+        $r = Invoke-ScanStep $Env
+        $r.ExitCode | Should -Be 0
+        $r.Args | Should -Not -Match '--log-opts'
+        $r.Args | Should -Match '^git --no-banner --redact --exit-code 1 \.'
+        Join-Path $Repo 'pwned' | Should -Not -Exist
+    }
+}
+
 Describe 'Default-branch ruleset' {
     BeforeAll {
         $script:RulesetPath = Join-Path $RepoRoot 'rulesets' 'default-branch-protection.json'

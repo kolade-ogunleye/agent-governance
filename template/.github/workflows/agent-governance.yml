@@ -1,0 +1,24 @@
+# Managed by agent-governance: Sync-AgentGovernance rewrites this file and its pinned hub commit.
+# Do not edit by hand; re-sync from the hub to update the pin.
+# Server-side checks: secret scan (commits a PR or push introduces; full history weekly and on demand),
+# branch policy on pull requests, and integrity of managed files against the hub at the locked commit.
+name: Agent Governance
+
+on:
+  pull_request:
+  push:
+    branches: [__DEFAULT_BRANCH__]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    uses: __HUB_REPOSITORY__/.github/workflows/governance-gate.yml@__HUB_COMMIT__
+    with:
+      hub_repository: __HUB_REPOSITORY__
+    secrets:
+      hub_token: ${{ secrets.AGENT_GOVERNANCE_HUB_TOKEN }}
