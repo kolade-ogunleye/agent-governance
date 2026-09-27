@@ -10,6 +10,14 @@ on:
         description: Hub repository (owner/name) that the caller's .agent-governance.lock refers to.
         type: string
         default: kolade-ogunleye/agent-governance
+      hub_max_age_warn_days:
+        description: Warn when the hub commit recorded in .agent-governance.lock is older than this many days.
+        type: number
+        default: 30
+      hub_max_age_fail_days:
+        description: Fail when the hub commit recorded in .agent-governance.lock is older than this many days.
+        type: number
+        default: 90
       full_history_secret_scan:
         description: Scan the entire history instead of only the commits a pull request or push introduces.
         type: boolean
@@ -124,11 +132,39 @@ jobs:
         continue-on-error: true
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ inputs.hub_repository }}
+          # The gate's own repository (trusted) rather than a caller-supplied input, when available.
+          repository: ${{ job.workflow_repository || inputs.hub_repository }}
           ref: ${{ steps.lock.outputs.commit }}
           path: _governance_hub
           token: ${{ secrets.hub_token || github.token }}
           persist-credentials: false
+
+      - name: Check hub pin consistency and freshness
+        if: steps.lock.outputs.present == 'true' && steps.hub.outcome == 'success'
+        shell: pwsh
+        env:
+          HUB_DIR: _governance_hub
+          LOCK_COMMIT: ${{ steps.lock.outputs.commit }}
+          GATE_SHA: ${{ job.workflow_sha }}
+          WARN_DAYS: ${{ inputs.hub_max_age_warn_days }}
+          FAIL_DAYS: ${{ inputs.hub_max_age_fail_days }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Sync writes the lock and the gate pin together, so a mismatch means a partial edit or a downgrade.
+          if ($env:GATE_SHA -match '^[0-9a-f]{40}$' -and $env:LOCK_COMMIT -ne $env:GATE_SHA) {
+              Write-Host "::error::.agent-governance.lock hub.commit $($env:LOCK_COMMIT) does not match the gate pin $($env:GATE_SHA). Re-run Sync-AgentGovernance instead of editing either by hand."
+              exit 1
+          }
+          $committed = [DateTimeOffset]::FromUnixTimeSeconds([long]"$(git -C $env:HUB_DIR log -1 --format=%ct)".Trim())
+          $ageDays = [int][Math]::Floor(([DateTimeOffset]::UtcNow - $committed).TotalDays)
+          if ($ageDays -gt [int]$env:FAIL_DAYS) {
+              Write-Host "::error::The locked hub commit is $ageDays days old (older than $($env:FAIL_DAYS) days). Re-sync from the current hub."
+              exit 1
+          }
+          if ($ageDays -gt [int]$env:WARN_DAYS) {
+              Write-Host "::warning::The locked hub commit is $ageDays days old (older than $($env:WARN_DAYS) days). Re-sync from the current hub soon."
+          }
+          Write-Host "Hub pin consistent; locked hub commit is $ageDays days old."
 
       - name: Report an unreachable hub
         if: steps.lock.outputs.present == 'true' && steps.hub.outcome != 'success'

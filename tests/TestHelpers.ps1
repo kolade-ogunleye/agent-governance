@@ -66,6 +66,27 @@ function New-CommandShim {
     }
 }
 
+function Get-WorkflowStepScript {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkflowPath,
+        [Parameter(Mandatory = $true)][string]$StepName
+    )
+    # Returns the dedented `run: |` block of the named step, so tests execute the shipped script itself.
+    $lines = Get-Content -LiteralPath $WorkflowPath
+    $step = [array]::FindIndex([string[]]$lines, [Predicate[string]] { param($l) $l -match "^\s+- name: $([regex]::Escape($StepName))\s*$" })
+    if ($step -lt 0) { throw "Step '$StepName' not found in $WorkflowPath" }
+    $runIdx = $step + 1
+    while ($lines[$runIdx] -notmatch '^\s+run: \|\s*$') { $runIdx++ }
+    $indent = ($lines[$runIdx + 1] -replace '^(\s*).*', '$1').Length
+    $body = [System.Collections.Generic.List[string]]::new()
+    for ($i = $runIdx + 1; $i -lt $lines.Count -and ($lines[$i] -eq '' -or ($lines[$i] -replace '^(\s*).*', '$1').Length -ge $indent); $i++) {
+        $body.Add($(if ($lines[$i].Length -ge $indent) { $lines[$i].Substring($indent) } else { '' }))
+    }
+    return ($body -join "`n").TrimEnd() + "`n"
+}
+
 function Invoke-HookScript {
     [CmdletBinding()]
     param(

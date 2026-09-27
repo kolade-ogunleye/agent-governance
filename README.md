@@ -142,8 +142,9 @@ commit recorded in the lock. Markdown comparisons tolerate whitespace changes.
 
 The reusable CI workflow runs this trusted comparison automatically: it checks
 out the hub at the locked commit and runs the hub's verifier against the caller.
-The locked commit is still caller-chosen, so the check proves the files match a
-real hub version, not the newest one. A repository-local lock and verifier on
+It also requires the locked commit to equal the gate's own pinned commit (sync
+writes both, so a hand-edited downgrade fails) and warns after 30 days / fails
+after 90 days of hub staleness (`hub_max_age_warn_days`, `hub_max_age_fail_days`). A repository-local lock and verifier on
 their own are not a tamper-proof security boundary.
 
 ### 4. Lockfile-Aware Polyglot Detection
