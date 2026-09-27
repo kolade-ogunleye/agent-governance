@@ -536,6 +536,20 @@ fi
 
             Write-Host "⚡ Reconciling governance and guardrails..." -ForegroundColor Green
 
+            # 2.5 Branch Isolation: If BranchAndCommit is requested, isolate branch before modifying any files
+            if ($BranchAndCommit) {
+                $currentBranch = (git --no-pager branch --show-current).Trim()
+                if ($currentBranch -in @("main", "master") -or $currentBranch -notmatch '^(feat|fix|patch|hotfix|refactor|chore|test)/') {
+                    $branchExists = (git --no-pager branch --list "chore/agent-governance")
+                    if ($branchExists) {
+                        git checkout chore/agent-governance 2>$null | Out-Null
+                    } else {
+                        git checkout -b chore/agent-governance 2>$null | Out-Null
+                    }
+                    Write-Host "  🌿 Checked out branch: $(git --no-pager branch --show-current)" -ForegroundColor Cyan
+                }
+            }
+
             # 3. Create target directories
             $agentsRulesDir = Join-Path $resolvedDir ".agents\rules"
             $agentsStateDir = Join-Path $resolvedDir ".agents\state"
@@ -793,19 +807,10 @@ fi
             # 12. Scoped Downstream Formatter Execution
             Invoke-DownstreamFormatting -targetDir $resolvedDir
 
-            # 13. Optional Safe Branching and Conventional Commits
+            # 13. Optional Safe Conventional Commits
             if ($BranchAndCommit) {
                 $govStatus = (git --no-pager status --porcelain)
                 if ($govStatus) {
-                    $currentBranch = (git --no-pager branch --show-current)
-                    if ($currentBranch -in @("main", "master") -or $currentBranch -notmatch '^(feat|fix|patch|hotfix|refactor|chore|test)/') {
-                        $branchExists = (git --no-pager branch --list "chore/agent-governance")
-                        if ($branchExists) {
-                            git checkout chore/agent-governance 2>$null | Out-Null
-                        } else {
-                            git checkout -b chore/agent-governance 2>$null | Out-Null
-                        }
-                    }
 
                     $stageItems = @(
                         "AGENTS.md", "CLAUDE.md", "PROJECT.md", "lefthook.yml",
