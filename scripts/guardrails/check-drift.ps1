@@ -30,12 +30,24 @@ foreach ($relPath in $criticalFiles) {
     $repoFile = Join-Path $repoRoot $relPath
 
     if ((Test-Path $hubFile) -and (Test-Path $repoFile)) {
-        $hubHash = (Get-FileHash -Path $hubFile -Algorithm SHA256).Hash
-        $repoHash = (Get-FileHash -Path $repoFile -Algorithm SHA256).Hash
-        if ($hubHash -ne $repoHash) {
-            $hasDrift = $true
-            break
+        $hubRaw = Get-Content -Path $hubFile -Raw
+        $repoRaw = Get-Content -Path $repoFile -Raw
+
+        if ($hubRaw -eq $repoRaw) {
+            continue
         }
+
+        # For markdown files, compare semantic content ignoring downstream formatting whitespace
+        if ($relPath.EndsWith(".md")) {
+            $hubNorm = ($hubRaw -replace '\s+', ' ').Trim()
+            $repoNorm = ($repoRaw -replace '\s+', ' ').Trim()
+            if ($hubNorm -eq $repoNorm) {
+                continue
+            }
+        }
+
+        $hasDrift = $true
+        break
     }
 }
 
