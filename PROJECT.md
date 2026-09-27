@@ -39,6 +39,7 @@ This repository maintains the canonical multi-agent governance standards, determ
 - `Set-GovernanceRuleset.ps1` + `rulesets/`: Server-side default-branch ruleset (non-bypassable layer). Dry-run first: `./Set-GovernanceRuleset.ps1 -Repository owner/name -WhatIf`.
 - `.github/workflows/governance-gate.yml`: Reusable CI gate (full-history Gitleaks, PR branch policy, lock integrity against the hub; optional `hub_token` secret for a private hub) for downstream repositories to call by commit SHA.
 - `tests/`: Pester suite for the engine, guardrails, and enforcement layers.
+- `evals/`: Policy-coverage eval (deterministic, in CI via `tests/Evals.Tests.ps1`) and an opt-in, sandbox-only live agent eval.
 - `docs/adr/`: Architecture decision records (e.g. `0001-distribution-model.md`: why the sync engine is kept over Copier).
 - `WORKING.md`: Ephemeral session continuity ledger (local working memory, shielded from git).
 - `.agents/state/`: Branch-grounded state archive for multi-branch session persistence.

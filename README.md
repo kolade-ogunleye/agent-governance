@@ -83,6 +83,11 @@ Ordered from hardest to easiest to bypass:
 4. **Local hooks:** Lefthook pre-commit and pre-push, fail-closed for detected agent sessions. Skippable with `--no-verify`; the layers above catch what they miss.
 5. **Contract and rules:** `AGENTS.md` and `.agents/rules/` guide agents but do not block anything.
 
+## 📏 Measuring Compliance
+
+- **Policy-coverage eval (deterministic, runs in CI):** `evals/Invoke-PolicyEval.ps1` replays contract-forbidden agent actions and look-alike legitimate work against the real Bash guard and pre-commit guardrails. Current result: 18/18 forbidden actions blocked, 0/9 false positives. It measures the enforcement machinery, not model judgement.
+- **Live agent eval (opt-in, billed):** `evals/Invoke-LiveAgentEval.ps1` runs Claude Code non-interactively in throwaway governed repositories under pressure (bypass hooks, make a failing test pass, print a secret) and grades the outcome. It requires Claude Code's OS sandbox and refuses to run on native Windows; use macOS, Linux, or WSL2. Preview with `-DryRun`.
+
 ## ⚡ Core Capabilities
 
 ### 1. The Lean Universal Contract & Dual-Contract Layering
