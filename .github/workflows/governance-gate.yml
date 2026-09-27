@@ -1,0 +1,114 @@
+name: Governance Gate
+
+# Reusable server-side checks that local hooks cannot guarantee (hooks are skippable with --no-verify).
+# Callers: jobs.<id>.uses: kolade-ogunleye/agent-governance/.github/workflows/governance-gate.yml@<commit-sha>
+#          with a `secrets: hub_token: ...` read-only token when the hub repository is private.
+on:
+  workflow_call:
+    inputs:
+      hub_repository:
+        description: Hub repository (owner/name) that the caller's .agent-governance.lock refers to.
+        type: string
+        default: kolade-ogunleye/agent-governance
+    secrets:
+      hub_token:
+        description: Read-only contents token for the hub. Required only when the hub repository is private.
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_LINUX_X64_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Gitleaks (checksum verified)
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_LINUX_X64_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "$archive" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+
+      - name: Scan full history for secrets
+        run: gitleaks git --no-banner --redact --exit-code 1 .
+
+  branch-policy:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce semantic branch name
+        env:
+          # Passed via env, never interpolated into the script, to prevent injection through branch names.
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$HEAD_REF" =~ ^(feat|fix|patch|hotfix|refactor|chore|test)/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ ]]; then
+            echo "::error::Branch '$HEAD_REF' violates the semantic branching policy (feat|fix|patch|hotfix|refactor|chore|test)/<slug>."
+            exit 1
+          fi
+          echo "Branch '$HEAD_REF' follows the semantic branching policy."
+
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read locked hub commit
+        id: lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path -LiteralPath '.agent-governance.lock')) {
+              Write-Host "::notice::No .agent-governance.lock; governance integrity check skipped."
+              "present=false" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+          $commit = [string](Get-Content -LiteralPath '.agent-governance.lock' -Raw | ConvertFrom-Json).hub.commit
+          # The lock is repository content: accept only a full commit SHA before using it as a checkout ref.
+          if ($commit -notmatch '^[0-9a-f]{40}$') {
+              Write-Host "::error::.agent-governance.lock hub.commit must be a 40-character commit SHA."
+              exit 1
+          }
+          "present=true" >> $env:GITHUB_OUTPUT
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout hub at the locked commit
+        id: hub
+        if: steps.lock.outputs.present == 'true'
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.hub_repository }}
+          ref: ${{ steps.lock.outputs.commit }}
+          path: _governance_hub
+          token: ${{ secrets.hub_token || github.token }}
+          persist-credentials: false
+
+      - name: Report an unreachable hub
+        if: steps.lock.outputs.present == 'true' && steps.hub.outcome != 'success'
+        env:
+          # Via env, never interpolated into the script, to prevent injection through the input.
+          HUB_REPOSITORY: ${{ inputs.hub_repository }}
+        run: |
+          echo "::warning::Could not fetch ${HUB_REPOSITORY} at the locked commit; integrity check skipped. Pass a read-only hub_token secret (private hub) and make sure the locked commit is pushed."
+
+      - name: Verify managed files against the hub template
+        if: steps.lock.outputs.present == 'true' && steps.hub.outcome == 'success'
+        shell: pwsh
+        # Runs the hub's own verifier: the caller's copy could itself have been modified.
+        run: ./_governance_hub/template/scripts/guardrails/verify-governance.ps1 -HubTemplate ./_governance_hub/template

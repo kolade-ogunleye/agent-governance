@@ -13,7 +13,10 @@
 .PARAMETER RepoPath
     The target repository path to initialize or update. Defaults to current directory.
 .PARAMETER All
-    If specified, scans and safely audits/updates all git repositories in C:\Users\omokolade\GitHub.
+    If specified, scans and safely audits/updates every git repository directly under -FleetRoot.
+.PARAMETER FleetRoot
+    Directory whose child git repositories -All operates on. Defaults to $env:AGENT_GOVERNANCE_FLEET_ROOT,
+    else the directory that contains this hub repository.
 .PARAMETER AuditOnly
     Inspects and reports status without making any file changes.
 .PARAMETER BranchAndCommit
@@ -25,7 +28,10 @@
     Syncs current repository with Central Governance Hub.
 .EXAMPLE
     Sync-AgentGovernance -All -AuditOnly
-    Audits all repositories in C:\Users\omokolade\GitHub.
+    Audits all repositories under the fleet root.
+.EXAMPLE
+    Sync-AgentGovernance -RepoPath ../my-service -WhatIf
+    Lists the files a sync would create or update, without writing anything.
 .EXAMPLE
     Sync-AgentGovernance audit -a
     Short subcommand syntax for fleet-wide audit.
@@ -34,7 +40,8 @@
     Displays detailed help and CLI reference.
 #>
 function Sync-AgentGovernance {
-    [CmdletBinding(DefaultParameterSetName = 'Standard')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'BranchAndCommit', Justification = 'Read by the nested Sync-SingleRepo through dynamic scope.')]
+    [CmdletBinding(DefaultParameterSetName = 'Standard', SupportsShouldProcess = $true)]
     param(
         [Parameter(Position = 0)]
         [ValidateSet('sync', 'audit', 'status', 'help', '')]
@@ -47,6 +54,9 @@ function Sync-AgentGovernance {
         [Parameter()]
         [Alias('a')]
         [switch]$All,
+
+        [Parameter()]
+        [string]$FleetRoot,
 
         [Parameter()]
         [Alias('m')]
@@ -62,6 +72,7 @@ function Sync-AgentGovernance {
     )
 
     function Set-Utf8LfContent {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Every caller runs after the ShouldProcess gate in Sync-SingleRepo.')]
         param(
             [Parameter(Mandatory = $true)]
             [string]$Path,
@@ -70,6 +81,81 @@ function Sync-AgentGovernance {
         )
         $normalized = ($Content -replace "\r\n", "`n").TrimEnd("`n") + "`n"
         [System.IO.File]::WriteAllText($Path, $normalized, [System.Text.UTF8Encoding]::new($false))
+    }
+
+    function Get-MissingEntry {
+        [OutputType([string[]])]
+        param(
+            [AllowEmptyString()]
+            [string]$ExistingText,
+            [Parameter(Mandatory = $true)]
+            [string]$CanonicalText
+        )
+        # Exact, whitespace-trimmed line comparison: a substring match would treat '*.key' as present
+        # whenever '*.keystore' exists, silently dropping secret-shield rules.
+        $present = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($line in ($ExistingText -split "`r?`n")) { [void]$present.Add($line.Trim()) }
+
+        $missing = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in ($CanonicalText -split "`r?`n")) {
+            $trimmed = $line.Trim()
+            if ($trimmed -and -not $trimmed.StartsWith("#") -and $present.Add($trimmed)) {
+                $missing.Add($trimmed)
+            }
+        }
+        return , $missing.ToArray()
+    }
+
+    function Get-NormalizedHash {
+        [OutputType([string])]
+        param([Parameter(Mandatory = $true)][string]$Path)
+        # Line-ending normalized (matches verify-governance.ps1) so CRLF checkouts hash identically.
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes(([System.IO.File]::ReadAllText($Path) -replace "`r`n", "`n"))
+        return [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    }
+
+    function Get-ManagedFile {
+        [OutputType([pscustomobject[]])]
+        param([Parameter(Mandatory = $true)][string]$HubDir)
+        # Files the engine owns downstream: Target is repo-relative (forward slashes); Source is the hub
+        # file to copy, or $null when the engine generates the content (Content).
+        $managed = [System.Collections.Generic.List[pscustomobject]]::new()
+        $managed.Add([pscustomobject]@{ Target = 'AGENTS.md'; Source = (Join-Path $HubDir 'AGENTS.md'); Content = $null })
+        $managed.Add([pscustomobject]@{ Target = 'CLAUDE.md'; Source = $null; Content = "@AGENTS.md`n" })
+        $managed.Add([pscustomobject]@{ Target = '.github/copilot-instructions.md'; Source = (Join-Path $HubDir 'AGENTS.md'); Content = $null })
+        $managed.Add([pscustomobject]@{ Target = 'lefthook.yml'; Source = (Join-Path $HubDir 'lefthook.yml'); Content = $null })
+        foreach ($rule in Get-ChildItem -Path (Join-Path $HubDir '.agents' 'rules') -File) {
+            $managed.Add([pscustomobject]@{ Target = ".agents/rules/$($rule.Name)"; Source = $rule.FullName; Content = $null })
+            $managed.Add([pscustomobject]@{ Target = ".claude/rules/$($rule.Name)"; Source = $rule.FullName; Content = $null })
+        }
+        foreach ($guard in Get-ChildItem -Path (Join-Path $HubDir 'scripts' 'guardrails') -File) {
+            $managed.Add([pscustomobject]@{ Target = "scripts/guardrails/$($guard.Name)"; Source = $guard.FullName; Content = $null })
+        }
+        return , $managed.ToArray()
+    }
+
+    function Get-PlannedChange {
+        [OutputType([string[]])]
+        param(
+            [Parameter(Mandatory = $true)][string]$TargetDir,
+            [Parameter(Mandatory = $true)][string]$HubDir
+        )
+        $plan = [System.Collections.Generic.List[string]]::new()
+        foreach ($file in (Get-ManagedFile -HubDir $HubDir)) {
+            $targetPath = Join-Path $TargetDir $file.Target
+            $desired = if ($file.Source) { [System.IO.File]::ReadAllText($file.Source) } else { $file.Content }
+            if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+                $plan.Add("create  $($file.Target)")
+            } elseif (([System.IO.File]::ReadAllText($targetPath) -replace "`r`n", "`n") -ne ($desired -replace "`r`n", "`n")) {
+                $plan.Add("update  $($file.Target)")
+            }
+        }
+        foreach ($optional in @('PROJECT.md', '.claude/settings.json', '.gemini/settings.json', '.agent-governance.lock')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $TargetDir $optional))) { $plan.Add("create  $optional") }
+        }
+        $plan.Add("merge   .gitignore / .gitattributes (missing canonical entries only)")
+        $plan.Add("chain   git pre-commit / pre-push hooks")
+        return , $plan.ToArray()
     }
 
     function Show-HelpManual {
@@ -95,7 +181,9 @@ SUBCOMMANDS:
 
 PARAMETERS:
     -RepoPath, -r <path> Target repository path. Defaults to current working directory.
-    -All, -a             Scans and operates across ALL git repos in C:\Users\omokolade\GitHub.
+    -All, -a             Scans and operates across ALL git repos under -FleetRoot.
+    -FleetRoot <path>    Parent directory for -All (default: `$env:AGENT_GOVERNANCE_FLEET_ROOT or the hub's parent).
+    -WhatIf              Lists planned file changes per repository without writing anything.
     -AuditOnly, -m       Inspects and reports status without making changes.
     -BranchAndCommit, -c Safely branches to chore/agent-governance and auto-commits
                          governance baselines on clean repositories.
@@ -113,7 +201,7 @@ EXAMPLES:
     Sync-AgentGovernance -All -AuditOnly
 
     # 4. Synchronize specific repository with auto-branching:
-    Sync-AgentGovernance -r "C:\Users\omokolade\GitHub\content-estate" -c
+    Sync-AgentGovernance -r ../content-estate -c
 
     # 5. Check central hub status:
     Sync-AgentGovernance status
@@ -131,10 +219,10 @@ EXAMPLES:
         $AuditOnly = $true
     }
 
-    # Locate Central Hub (Prioritize development repo, then user home junction)
+    # Locate Central Hub (template beside this script, then the per-user hub location)
     $hubCandidates = @(
-        "C:\Users\omokolade\GitHub\agent-governance\template",
-        (Join-Path $env:USERPROFILE ".agent-governance\template")
+        (Join-Path $PSScriptRoot "template"),
+        (Join-Path $HOME ".agent-governance" "template")
     )
     $hubDir = $null
     foreach ($candidate in $hubCandidates) {
@@ -169,7 +257,7 @@ EXAMPLES:
         return
     }
 
-    function Detect-ProjectStack {
+    function Get-ProjectStack {
         param([string]$targetDir, [string]$repoName)
 
         $types = [System.Collections.Generic.List[string]]::new()
@@ -320,7 +408,7 @@ EXAMPLES:
         }
     }
 
-    function Reconcile-GitHooks {
+    function Sync-GitHook {
         param([string]$targetDir)
 
         $localHooksPath = (git -C $targetDir --no-pager config --local core.hooksPath)
@@ -329,18 +417,17 @@ EXAMPLES:
 
         if ($localHooksPath) {
             $isCustomHookPath = $true
-            if ([System.IO.Path]::IsPathRooted($localHooksPath)) {
-                $fullTarget = (Resolve-Path $targetDir).Path
-                if ($localHooksPath.StartsWith($fullTarget, [System.StringComparison]::OrdinalIgnoreCase)) {
-                    $hookDir = $localHooksPath
-                } else {
-                    Write-Warning "  ⚠️ core.hooksPath points OUTSIDE this repo ($localHooksPath)."
-                    Write-Warning "     Localizing hooksPath to .githooks inside $targetDir to avoid cross-repo pollution."
-                    git -C $targetDir config --local core.hooksPath .githooks
-                    $hookDir = Join-Path $targetDir ".githooks"
-                }
+            $fullTarget = (Resolve-Path $targetDir).Path
+            $candidate = [System.IO.Path]::GetFullPath($localHooksPath, $fullTarget)
+            $relative = [System.IO.Path]::GetRelativePath($fullTarget, $candidate)
+            if ([System.IO.Path]::IsPathRooted($relative) -or $relative -match '^\.\.([\\/]|$)') {
+                Write-Warning "  ⚠️ core.hooksPath points OUTSIDE this repo ($localHooksPath)."
+                Write-Warning "     Localizing hooksPath to .githooks inside $targetDir to avoid cross-repo pollution."
+                git -C $targetDir config --local core.hooksPath .githooks
+                if ($LASTEXITCODE -ne 0) { throw 'Failed to localize core.hooksPath.' }
+                $hookDir = Join-Path $targetDir '.githooks'
             } else {
-                $hookDir = Join-Path $targetDir $localHooksPath
+                $hookDir = $candidate
             }
         } else {
             $hookDir = Join-Path $targetDir ".git\hooks"
@@ -350,73 +437,84 @@ EXAMPLES:
             New-Item -ItemType Directory -Path $hookDir -Force | Out-Null
         }
 
-        function Inject-ChainBlock {
+        function Add-GovernanceHookBlock {
             param(
                 [string]$hookFilePath,
                 [string]$lefthookCmd,
                 [string]$hookName
             )
 
+            # --no-auto-install stops Lefthook from regenerating (and thereby deleting) this fail-closed gate.
+            # Agent markers: CLAUDECODE / AI_AGENT are set by Claude Code; the rest are conventional opt-ins.
             $chainCode = @"
-# Chained by Agent Governance ($hookName)
+# >>> agent-governance ($hookName) >>>
 if command -v lefthook >/dev/null 2>&1; then
-  $lefthookCmd || exit 1
+  $lefthookCmd --no-auto-install || exit 1
 else
   echo "⚠️  [Agent Governance] 'lefthook' is not installed or not in PATH." >&2
   echo "   Install with: winget install evilmartians.lefthook (Windows) or brew install lefthook (macOS/Linux)" >&2
-  if [ -n "`$AGENT_ROLE" ] || [ -n "`$CLAUDE_CODE" ] || [ -n "`$GEMINI_CLI" ] || [ -n "`$CODEX_AGENT" ] || [ -n "`$COPILOT_AGENT" ]; then
+  if [ -n "`$CLAUDECODE" ] || [ -n "`$AI_AGENT" ] || [ -n "`$AGENT_ROLE" ] || [ -n "`$CLAUDE_CODE" ] || [ -n "`$GEMINI_CLI" ] || [ -n "`$CODEX_AGENT" ] || [ -n "`$COPILOT_AGENT" ]; then
     echo "❌ [Security Gate] Agent session detected without active Lefthook guardrails. Commit blocked." >&2
     exit 1
   fi
 fi
+# <<< agent-governance <<<
 "@
+            $chainCode = ($chainCode -replace "`r`n", "`n").Trim("`n")
 
+            $baseScript = "#!/bin/sh`nset -e`n`nexit 0`n"
             if (Test-Path $hookFilePath) {
-                $raw = Get-Content $hookFilePath -Raw
-                $cleaned = $raw -replace '(?s)\r?\n# Chained by Agent Governance.*', ''
-                $cleaned = $cleaned.TrimEnd()
-
-                $lines = [System.Collections.Generic.List[string]]($cleaned -split "`r?`n")
-                $terminalExitIdx = -1
-
-                for ($i = $lines.Count - 1; $i -ge 0; $i--) {
-                    $trimmed = $lines[$i].Trim()
-                    if ($trimmed -eq "exit 0") {
-                        $terminalExitIdx = $i
-                        break
-                    }
-                    elseif ($trimmed -ne "") {
-                        break
-                    }
+                $raw = [System.IO.File]::ReadAllText($hookFilePath) -replace "`r`n", "`n"
+                # A Lefthook-generated hook would run Lefthook twice (and fails open when it is missing); replace it.
+                if ($raw -notmatch '(?m)^call_lefthook run ') {
+                    $baseScript = $raw
                 }
-
-                if ($terminalExitIdx -ge 0) {
-                    $lines.Insert($terminalExitIdx, $chainCode.Trim("`r`n"))
-                    $finalScript = ($lines -join "`n") + "`n"
-                } else {
-                    $finalScript = $cleaned + "`n`n" + $chainCode.Trim("`r`n") + "`n"
-                }
-            } else {
-                $finalScript = "#!/bin/sh`nset -e`n`n" + $chainCode.Trim("`r`n") + "`n`nexit 0`n"
             }
 
-            $finalScript = $finalScript -replace "`r`n", "`n"
+            # Remove only governance-owned blocks: the current marked format and the legacy unmarked format,
+            # which always ended with the nested "  fi" / "fi" pair. User lines around them are kept.
+            $cleaned = [regex]::Replace($baseScript, '(?ms)^# >>> agent-governance .*?^# <<< agent-governance <<<\n?', '')
+            $cleaned = [regex]::Replace($cleaned, '(?s)# Chained by Agent Governance[^\n]*\n.*?\n  fi\nfi\n?', '')
+            $cleaned = ($cleaned -replace "\n{3,}", "`n`n").TrimEnd()
+
+            $lines = [System.Collections.Generic.List[string]]($cleaned -split "`n")
+            $terminalExitIdx = -1
+            for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+                $trimmed = $lines[$i].Trim()
+                if ($trimmed -eq "exit 0") {
+                    $terminalExitIdx = $i
+                    break
+                }
+                elseif ($trimmed -ne "") {
+                    break
+                }
+            }
+
+            if ($terminalExitIdx -ge 0) {
+                $lines.Insert($terminalExitIdx, $chainCode)
+                $finalScript = ($lines -join "`n") + "`n"
+            } else {
+                $finalScript = $cleaned + "`n`n" + $chainCode + "`n"
+            }
+
             [System.IO.File]::WriteAllText($hookFilePath, $finalScript, [System.Text.UTF8Encoding]::new($false))
+            if (-not $IsWindows) {
+                # Git silently ignores non-executable hooks on POSIX systems.
+                & chmod +x $hookFilePath
+            }
         }
 
         $preCommitFile = Join-Path $hookDir "pre-commit"
         $prePushFile = Join-Path $hookDir "pre-push"
 
-        Inject-ChainBlock -hookFilePath $preCommitFile -lefthookCmd "lefthook run pre-commit" -hookName "Lefthook + Gitleaks"
-        Inject-ChainBlock -hookFilePath $prePushFile -lefthookCmd "lefthook run pre-push" -hookName "Supply-Chain & Test Audit"
+        Add-GovernanceHookBlock -hookFilePath $preCommitFile -lefthookCmd "lefthook run pre-commit" -hookName "Lefthook + Gitleaks"
+        Add-GovernanceHookBlock -hookFilePath $prePushFile -lefthookCmd "lefthook run pre-push" -hookName "Supply-Chain & Test Audit"
 
+        # 'lefthook install' is deliberately not run: it would replace these fail-closed hooks with its own.
         if ($isCustomHookPath) {
             Write-Host "  🔗 Chained Lefthook inside custom hooks ($hookDir) before terminal exit 0" -ForegroundColor Green
         } else {
-            if (Get-Command lefthook -ErrorAction SilentlyContinue) {
-                & lefthook install >$null 2>&1
-            }
-            Write-Host "  ✔️ Lefthook Git hooks active in $hookDir" -ForegroundColor Green
+            Write-Host "  ✔️ Governance-gated Lefthook hooks active in $hookDir" -ForegroundColor Green
         }
     }
 
@@ -446,7 +544,8 @@ fi
                     Pop-Location
                 }
             } catch {
-                # Non-blocking fallback
+                # Non-blocking fallback to npx below
+                Write-Verbose "Local Prettier failed in ${targetDir}: $($_.Exception.Message)"
             }
         }
 
@@ -459,7 +558,9 @@ fi
                     ($pkgRaw.dependencies -and $pkgRaw.dependencies.PSObject.Properties['prettier'])) {
                     $hasPkgPrettier = $true
                 }
-            } catch {}
+            } catch {
+                Write-Verbose "Unreadable package.json in ${targetDir}; skipping npx Prettier: $($_.Exception.Message)"
+            }
 
             if ($hasPkgPrettier -and (Get-Command npx -ErrorAction SilentlyContinue)) {
                 try {
@@ -474,7 +575,8 @@ fi
                         Pop-Location
                     }
                 } catch {
-                    # Non-blocking fallback
+                    # Non-blocking: governed files stay unformatted
+                    Write-Verbose "npx Prettier failed in ${targetDir}: $($_.Exception.Message)"
                 }
             }
         }
@@ -509,7 +611,7 @@ fi
             if ($status) {
                 $modifiedLines = ($status -split "`r?`n") | Where-Object { $_.Trim() }
                 $nonGovChanges = $modifiedLines | Where-Object { 
-                    $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.gemini|\.github|\.gitattributes|AGENTS\.md|CLAUDE\.md|PROJECT\.md|WORKING\.md|lefthook\.yml|scripts/|docs/LEGACY-AGENT-NOTES\.md|\.claudeignore|\.codexignore)' -and
+                    $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.gemini|\.github|\.gitattributes|\.gitignore|AGENTS\.md|CLAUDE\.md|PROJECT\.md|WORKING\.md|lefthook\.yml|scripts/|docs/LEGACY-AGENT-NOTES\.md|\.agent-governance\.lock)' -and
                     $_ -notmatch '^ M (\.gitignore|\.gitattributes)' -and
                     $_ -notmatch '^ M (\.githooks|\.husky|\.git/hooks)'
                 }
@@ -534,6 +636,14 @@ fi
                 return
             }
 
+            if (-not $PSCmdlet.ShouldProcess($resolvedDir, "Apply governance baseline")) {
+                foreach ($change in (Get-PlannedChange -TargetDir $resolvedDir -HubDir $hubDir)) {
+                    Write-Host "  [WhatIf] $change" -ForegroundColor DarkYellow
+                }
+                if ($BranchAndCommit) { Write-Host "  [WhatIf] commit  on branch chore/agent-governance" -ForegroundColor DarkYellow }
+                return
+            }
+
             Write-Host "⚡ Reconciling governance and guardrails..." -ForegroundColor Green
 
             # 2.5 Branch Isolation: If BranchAndCommit is requested, isolate branch before modifying any files
@@ -546,6 +656,7 @@ fi
                     } else {
                         git checkout -b chore/agent-governance 2>$null | Out-Null
                     }
+                    if ($LASTEXITCODE -ne 0) { throw 'Governance branch checkout failed; no files were changed.' }
                     Write-Host "  🌿 Checked out branch: $(git --no-pager branch --show-current)" -ForegroundColor Cyan
                 }
             }
@@ -566,41 +677,66 @@ fi
             New-Item -ItemType Directory -Path $claudeDir -Force | Out-Null
             New-Item -ItemType Directory -Path $geminiDir -Force | Out-Null
 
-            # 4. Handle Legacy Instructions
-            $existingAgentsPath = Join-Path $resolvedDir "AGENTS.md"
-            $existingClaudePath = Join-Path $resolvedDir "CLAUDE.md"
-            $templateAgentsContent = (Get-Content (Join-Path $hubDir "AGENTS.md") -Raw).Trim()
+            # 4. Preserve every custom instruction file before governance overwrites or relinks it
+            $templateAgentsContent = ((Get-Content (Join-Path $hubDir "AGENTS.md") -Raw) -replace "`r`n", "`n").Trim()
+            # Earlier hub versions of the managed contract share its title line; they are replaced, not archived.
+            $contractTitle = ($templateAgentsContent -split "`n")[0].Trim()
+            $legacyPath = Join-Path $docsDir "LEGACY-AGENT-NOTES.md"
+            $legacyContent = if (Test-Path $legacyPath) { (Get-Content $legacyPath -Raw) -replace "`r`n", "`n" } else { "" }
+            $lockPath = Join-Path $resolvedDir ".agent-governance.lock"
+            $previousLock = if (Test-Path $lockPath) { Get-Content $lockPath -Raw | ConvertFrom-Json } else { $null }
+            $archivedContents = [System.Collections.Generic.HashSet[string]]::new()
+            $archiveSections = [System.Collections.Generic.List[string]]::new()
             $hasPreservedLegacy = $false
 
-            if (Test-Path $existingAgentsPath) {
-                $currentContent = (Get-Content $existingAgentsPath -Raw).Trim()
-                if ($currentContent -and ($currentContent -ne $templateAgentsContent)) {
-                    New-Item -ItemType Directory -Path $docsDir -Force | Out-Null
-                    $backupPath = Join-Path $docsDir "LEGACY-AGENT-NOTES.md"
-                    if (-not (Test-Path $backupPath)) {
-                        Set-Utf8LfContent -Path $backupPath -Content $currentContent
-                        $hasPreservedLegacy = $true
-                        Write-Host "  🛡️ Preserved pre-existing custom AGENTS.md into docs/LEGACY-AGENT-NOTES.md"
-                    }
+            foreach ($instructionFile in @("AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md")) {
+                $instructionPath = Join-Path $resolvedDir $instructionFile
+                if (-not (Test-Path $instructionPath)) { continue }
+                $content = ([string](Get-Content $instructionPath -Raw) -replace "`r`n", "`n").Trim()
+                if (-not $content -or $content -eq $templateAgentsContent -or $content -eq '@AGENTS.md') { continue }
+                if ($content.StartsWith($contractTitle)) {
+                    # A managed contract is replaced unless the lock proves the team edited it after the last sync.
+                    $lockedHash = if ($previousLock) { [string]$previousLock.files.$instructionFile } else { '' }
+                    if (-not $lockedHash -or $lockedHash -eq (Get-NormalizedHash -Path $instructionPath)) { continue }
                 }
-            } elseif (Test-Path $existingClaudePath) {
-                $currentClaude = (Get-Content $existingClaudePath -Raw).Trim()
-                if ($currentClaude -and ($currentClaude -ne $templateAgentsContent)) {
-                    New-Item -ItemType Directory -Path $docsDir -Force | Out-Null
-                    $backupPath = Join-Path $docsDir "LEGACY-AGENT-NOTES.md"
-                    if (-not (Test-Path $backupPath)) {
-                        Set-Utf8LfContent -Path $backupPath -Content $currentClaude
-                        $hasPreservedLegacy = $true
-                        Write-Host "  🛡️ Preserved pre-existing custom CLAUDE.md into docs/LEGACY-AGENT-NOTES.md"
-                    }
-                }
+                # Hard-linked copies share content, and earlier syncs may already hold it.
+                if ($legacyContent.Contains($content) -or -not $archivedContents.Add($content)) { continue }
+
+                $archiveSections.Add(("## Archived from ``{0}```n`n{1}" -f $instructionFile, $content))
+                Write-Host "  🛡️ Preserved pre-existing custom $instructionFile into docs/LEGACY-AGENT-NOTES.md"
             }
 
-            # 5. Copy canonical rules and scripts from Hub
-            Copy-Item (Join-Path $hubDir "AGENTS.md") (Join-Path $resolvedDir "AGENTS.md") -Force
-            Copy-Item (Join-Path $hubDir "lefthook.yml") (Join-Path $resolvedDir "lefthook.yml") -Force
+            if ($archiveSections.Count -gt 0) {
+                New-Item -ItemType Directory -Path $docsDir -Force | Out-Null
+                $legacyHeader = if ($legacyContent.Trim()) {
+                    $legacyContent.TrimEnd()
+                } else {
+                    "# Legacy Agent Notes`n`nInstructions that existed before Agent Governance managed these files, preserved verbatim."
+                }
+                Set-Utf8LfContent -Path $legacyPath -Content ($legacyHeader + "`n`n" + ($archiveSections -join "`n`n"))
+                $hasPreservedLegacy = $true
+            }
+
+            # 5. Copy canonical rules and scripts from Hub.
+            # Delete-then-copy: legacy syncs hard-linked CLAUDE.md and copilot-instructions.md to AGENTS.md,
+            # and writing through a hard link would silently rewrite every linked name.
+            foreach ($rootFile in @("AGENTS.md", "lefthook.yml")) {
+                $dest = Join-Path $resolvedDir $rootFile
+                if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force }
+                Copy-Item (Join-Path $hubDir $rootFile) $dest
+            }
             Copy-Item (Join-Path $hubDir ".agents\rules\*") $agentsRulesDir -Force
             Copy-Item (Join-Path $hubDir "scripts\guardrails\*") $scriptsDir -Force
+
+            # 5b. Agent-native enforcement: Claude Code deny rules + PreToolUse Bash guard.
+            # Project settings are team-owned, so an existing file is never overwritten.
+            $targetClaudeSettings = Join-Path $claudeDir "settings.json"
+            if (-not (Test-Path $targetClaudeSettings)) {
+                Copy-Item (Join-Path $hubDir ".claude" "settings.json") $targetClaudeSettings
+                Write-Host "  ✔️ Installed Claude Code secret deny rules and Bash guard hook (.claude/settings.json)"
+            } elseif ((Get-Content $targetClaudeSettings -Raw) -notmatch 'agent-bash-guard\.ps1') {
+                Write-Warning "Kept existing .claude/settings.json; merge template/.claude/settings.json into it to enable agent guardrails."
+            }
 
             # 6. Auto-detect stack & generate rich PROJECT.md if missing or unpopulated
             $targetProjectFile = Join-Path $resolvedDir "PROJECT.md"
@@ -612,7 +748,7 @@ fi
 
                     # Reconcile Section 0 if missing and operational handover / lessons learned exist
                     if ($existingProject -notmatch '## 0\.\s+Operational Context') {
-                        $stack = Detect-ProjectStack -targetDir $resolvedDir -repoName $repoName
+                        $stack = Get-ProjectStack -targetDir $resolvedDir -repoName $repoName
                         $hasLegacy = (Test-Path (Join-Path $docsDir "LEGACY-AGENT-NOTES.md")) -or $hasPreservedLegacy
                         $hasHandover = [bool]$stack.OperationalHandover
                         $hasLessons = [bool]$stack.LessonsLearned
@@ -660,7 +796,7 @@ fi
             }
 
             if ($shouldGenerateProject) {
-                $stack = Detect-ProjectStack -targetDir $resolvedDir -repoName $repoName
+                $stack = Get-ProjectStack -targetDir $resolvedDir -repoName $repoName
                 $pMd = [System.Collections.Generic.List[string]]::new()
                 $pMd.Add("# Project Specification & Architecture: $($stack.Name)")
                 $pMd.Add("")
@@ -736,23 +872,21 @@ fi
                 Write-Host "  ✔️ Auto-detected stack ($($stack.PrimaryStack)) and generated tailored PROJECT.md"
             }
 
-            # 7. Intra-repo hard links for agent pointers
-            $targetAgents = Join-Path $resolvedDir "AGENTS.md"
-            New-Item -ItemType HardLink -Path (Join-Path $resolvedDir "CLAUDE.md") -Target $targetAgents -Force | Out-Null
-            New-Item -ItemType HardLink -Path (Join-Path $githubDir "copilot-instructions.md") -Target $targetAgents -Force | Out-Null
+            # 7. Per-tool instruction entry points as plain files (hard links do not survive git checkouts).
+            # Claude Code expands the @AGENTS.md import; Copilot Chat needs a real copy.
+            $claudeEntry = Join-Path $resolvedDir "CLAUDE.md"
+            if (Test-Path -LiteralPath $claudeEntry) { Remove-Item -LiteralPath $claudeEntry -Force }
+            Set-Utf8LfContent -Path $claudeEntry -Content "@AGENTS.md"
+            $copilotEntry = Join-Path $githubDir "copilot-instructions.md"
+            if (Test-Path -LiteralPath $copilotEntry) { Remove-Item -LiteralPath $copilotEntry -Force }
+            Copy-Item (Join-Path $hubDir "AGENTS.md") $copilotEntry
 
             # 8. Merge .gitignore rules non-destructively
             $targetGitignore = Join-Path $resolvedDir ".gitignore"
             if (Test-Path $targetGitignore) {
-                $existingIgnore = Get-Content $targetGitignore -Raw
+                $existingIgnore = [string](Get-Content $targetGitignore -Raw)
                 $hubIgnore = Get-Content (Join-Path $hubDir ".gitignore") -Raw
-                $missingEntries = @()
-                foreach ($line in ($hubIgnore -split "`r?`n")) {
-                    $trimmed = $line.Trim()
-                    if ($trimmed -and -not ($trimmed.StartsWith("#")) -and -not ($existingIgnore -match [regex]::Escape($trimmed))) {
-                        $missingEntries += $trimmed
-                    }
-                }
+                $missingEntries = Get-MissingEntry -ExistingText $existingIgnore -CanonicalText $hubIgnore
                 if ($missingEntries.Count -gt 0) {
                     $newIgnore = $existingIgnore.TrimEnd() + "`n`n# Added by Agent Governance`n" + ($missingEntries -join "`n") + "`n"
                     Set-Utf8LfContent -Path $targetGitignore -Content $newIgnore
@@ -768,15 +902,9 @@ fi
             $hubGitattrs = Join-Path $hubDir ".gitattributes"
             if (Test-Path $hubGitattrs) {
                 if (Test-Path $targetGitattrs) {
-                    $existingAttrs = Get-Content $targetGitattrs -Raw
+                    $existingAttrs = [string](Get-Content $targetGitattrs -Raw)
                     $hubAttrs = Get-Content $hubGitattrs -Raw
-                    $missingAttrs = @()
-                    foreach ($line in ($hubAttrs -split "`r?`n")) {
-                        $trimmed = $line.Trim()
-                        if ($trimmed -and -not ($trimmed.StartsWith("#")) -and -not ($existingAttrs -match [regex]::Escape($trimmed))) {
-                            $missingAttrs += $trimmed
-                        }
-                    }
+                    $missingAttrs = Get-MissingEntry -ExistingText $existingAttrs -CanonicalText $hubAttrs
                     if ($missingAttrs.Count -gt 0) {
                         $newAttrs = $existingAttrs.TrimEnd() + "`n`n# Added by Agent Governance`n" + ($missingAttrs -join "`n") + "`n"
                         Set-Utf8LfContent -Path $targetGitattrs -Content $newAttrs
@@ -788,24 +916,54 @@ fi
                 }
             }
 
-            New-Item -ItemType HardLink -Path (Join-Path $resolvedDir ".claudeignore") -Target $targetGitignore -Force | Out-Null
-            New-Item -ItemType HardLink -Path (Join-Path $resolvedDir ".codexignore") -Target $targetGitignore -Force | Out-Null
 
-            # 10. Directory junctions for native tool auto-injection
+            # 10. Tool-native wiring with real files (junctions are Windows-only and fragile in git).
             $claudeRules = Join-Path $claudeDir "rules"
             $geminiRules = Join-Path $geminiDir "rules"
-            if (-not (Test-Path $claudeRules)) {
-                New-Item -ItemType Junction -Path $claudeRules -Target $agentsRulesDir -Force | Out-Null
+            foreach ($legacyLink in @($claudeRules, $geminiRules)) {
+                $linkItem = Get-Item -LiteralPath $legacyLink -Force -ErrorAction SilentlyContinue
+                # Captured before deletion: LinkType is evaluated lazily and reads $null afterwards.
+                $linkType = if ($linkItem) { [string]$linkItem.LinkType } else { '' }
+                if ($linkType) {
+                    # Non-recursive delete removes only the link, never the canonical .agents/rules behind it.
+                    [System.IO.Directory]::Delete($legacyLink, $false)
+                    Write-Host "  ✔️ Removed legacy $($linkType.ToLower()) $([System.IO.Path]::GetRelativePath($resolvedDir, $legacyLink))"
+                }
             }
-            if (-not (Test-Path $geminiRules)) {
-                New-Item -ItemType Junction -Path $geminiRules -Target $agentsRulesDir -Force | Out-Null
+            New-Item -ItemType Directory -Path $claudeRules -Force | Out-Null
+            Copy-Item (Join-Path $hubDir ".agents" "rules" "*") $claudeRules -Force
+            # Gemini CLI reads context files named in .gemini/settings.json (it has no rules directory).
+            $geminiSettings = Join-Path $geminiDir "settings.json"
+            if (-not (Test-Path -LiteralPath $geminiSettings)) {
+                Set-Utf8LfContent -Path $geminiSettings -Content "{`n  `"context`": {`n    `"fileName`": [`"AGENTS.md`", `"GEMINI.md`"]`n  }`n}"
             }
 
             # 11. Intelligent Git Hook Reconciliation
-            Reconcile-GitHooks -targetDir $resolvedDir
+            Sync-GitHook -targetDir $resolvedDir
 
             # 12. Scoped Downstream Formatter Execution
             Invoke-DownstreamFormatting -targetDir $resolvedDir
+
+            # 12b. Lock manifest: hub version + normalized SHA-256 of every managed file (sorted, deterministic)
+            $hubRepoRoot = Split-Path -Parent $hubDir
+            $hubCommit = "$(git -C $hubRepoRoot rev-parse HEAD 2>$null)".Trim()
+            $hubDirty = [bool]"$(git -C $hubRepoRoot status --porcelain -- template 2>$null)".Trim()
+            $lockFiles = [ordered]@{}
+            foreach ($file in (Get-ManagedFile -HubDir $hubDir | Sort-Object Target)) {
+                $managedPath = Join-Path $resolvedDir $file.Target
+                if (Test-Path -LiteralPath $managedPath -PathType Leaf) {
+                    $lockFiles[$file.Target] = Get-NormalizedHash -Path $managedPath
+                }
+            }
+            $lockDocument = [ordered]@{
+                version = 1
+                hub     = [ordered]@{ commit = $(if ($hubCommit) { $hubCommit } else { $null }); dirty = $hubDirty }
+                files   = $lockFiles
+            }
+            # Put digests on their own indented lines: paths such as detect-secrets.ps1 are
+            # labels, not credential assignments. Keep the scanner enabled for the entire file.
+            $lockJson = ($lockDocument | ConvertTo-Json -Depth 5) -replace '(: )"([0-9a-f]{64})"', ":`n      `"`$2`""
+            Set-Utf8LfContent -Path $lockPath -Content $lockJson
 
             # 13. Optional Safe Conventional Commits
             if ($BranchAndCommit) {
@@ -815,21 +973,24 @@ fi
                     $stageItems = @(
                         "AGENTS.md", "CLAUDE.md", "PROJECT.md", "lefthook.yml",
                         ".agents", ".claude", ".gemini", ".github",
-                        ".gitignore", ".gitattributes", ".claudeignore", ".codexignore",
+                        ".gitignore", ".gitattributes", ".agent-governance.lock",
                         "scripts/guardrails", "docs/LEGACY-AGENT-NOTES.md"
                     )
                     foreach ($item in $stageItems) {
                         if (Test-Path (Join-Path $resolvedDir $item)) {
                             git add -- $item
+                            if ($LASTEXITCODE -ne 0) { throw "Failed to stage governance path: $item" }
                         }
                     }
                     if (Test-Path (Join-Path $resolvedDir ".githooks")) {
                         git add -- .githooks
+                        if ($LASTEXITCODE -ne 0) { throw 'Failed to stage governance hooks.' }
                     }
 
                     $staged = (git --no-pager diff --cached --name-only)
                     if ($staged) {
                         git commit -m "chore(governance): install unified agent contract and deterministic guardrails" | Out-Null
+                        if ($LASTEXITCODE -ne 0) { throw 'Governance commit failed; changes remain staged for review.' }
                         Write-Host "  ✅ Auto-committed governance baseline to branch: $(git --no-pager branch --show-current)" -ForegroundColor Green
                     }
                 }
@@ -842,8 +1003,12 @@ fi
     }
 
     if ($All) {
-        $githubRoot = "C:\Users\omokolade\GitHub"
-        $repos = Get-ChildItem -Path $githubRoot -Directory | Where-Object { $_.Name -ne "agent-governance" }
+        if (-not $FleetRoot) {
+            $FleetRoot = if ($env:AGENT_GOVERNANCE_FLEET_ROOT) { $env:AGENT_GOVERNANCE_FLEET_ROOT } else { Split-Path -Parent $PSScriptRoot }
+        }
+        $hubRepoRoot = (Resolve-Path (Split-Path -Parent $hubDir)).Path
+        $repos = Get-ChildItem -Path $FleetRoot -Directory |
+            Where-Object { (Test-Path (Join-Path $_.FullName ".git")) -and $_.FullName -ne $hubRepoRoot }
         Write-Host "🚀 Running Sync-AgentGovernance across $($repos.Count) repositories..." -ForegroundColor Magenta
         foreach ($repo in $repos) {
             Sync-SingleRepo -targetDir $repo.FullName

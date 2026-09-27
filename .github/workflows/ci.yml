@@ -2,9 +2,19 @@ name: Governance Engine CI
 
 on:
   push:
-    branches: [main, feat/*, chore/*, fix/*]
+    branches: [main, "feat/*", "fix/*", "patch/*", "hotfix/*", "refactor/*", "chore/*", "test/*"]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PESTER_VERSION: "6.2.0"
+  PSSA_VERSION: "1.25.0"
+  PRETTIER_VERSION: "3.9.9"
+  # Analyzer warnings allowed; held at 0 so any new warning fails CI.
+  PSSA_WARNING_BASELINE: "0"
 
 jobs:
   verify:
@@ -12,39 +22,73 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Install Lefthook & Gitleaks (Windows)
-        if: runner.os == 'Windows'
+      - name: Install pinned PowerShell test tooling
         shell: pwsh
         run: |
-          winget install evilmartians.lefthook --accept-source-agreements --accept-package-agreements
-          winget install Gitleaks.Gitleaks --accept-source-agreements --accept-package-agreements
+          Install-PSResource -Name Pester -Version $env:PESTER_VERSION -TrustRepository -Scope CurrentUser
+          Install-PSResource -Name PSScriptAnalyzer -Version $env:PSSA_VERSION -TrustRepository -Scope CurrentUser
 
-      - name: Install Lefthook & Gitleaks (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/evilmartians/lefthook/master/bin/install.sh | sudo sh -s -- -d -b /usr/local/bin
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | sudo tar -xz -C /usr/local/bin gitleaks
-
-      - name: Verify PowerShell Scripts syntax
+      - name: Verify PowerShell syntax
         shell: pwsh
         run: |
-          $scripts = Get-ChildItem -Path . -Filter "*.ps1" -Recurse
-          foreach ($script in $scripts) {
-              Write-Host "Validating $($script.FullName)..."
-              $null = [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$null, [ref]$null)
+          $failed = $false
+          foreach ($script in Get-ChildItem -Path . -Include *.ps1, *.psd1 -Recurse -File) {
+              $tokens = $null
+              $errors = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$errors)
+              foreach ($e in $errors) {
+                  Write-Host "::error file=$($script.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)"
+                  $failed = $true
+              }
           }
-          Write-Host "All PowerShell scripts passed syntax validation."
+          if ($failed) { exit 1 }
+          Write-Host "All PowerShell scripts parsed without errors."
 
-      - name: Verify Markdown LF Line Endings & Encoding
+      - name: Static analysis (PSScriptAnalyzer)
         shell: pwsh
         run: |
-          ./scripts/guardrails/check-markdown.ps1
+          Import-Module PSScriptAnalyzer -RequiredVersion $env:PSSA_VERSION
+          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+          $findings | Format-Table Severity, RuleName, ScriptName, Line -AutoSize | Out-String -Width 200 | Write-Host
+          $errorCount = @($findings | Where-Object Severity -eq 'Error').Count
+          $warningCount = @($findings | Where-Object Severity -eq 'Warning').Count
+          if ($errorCount -gt 0) { Write-Host "::error::$errorCount analyzer error(s)."; exit 1 }
+          if ($warningCount -gt [int]$env:PSSA_WARNING_BASELINE) {
+              Write-Host "::error::$warningCount analyzer warnings exceed baseline $($env:PSSA_WARNING_BASELINE)."
+              exit 1
+          }
 
-      - name: Verify Prettier Markdown Formatting
+      - name: Unit & integration tests (Pester)
+        shell: pwsh
         run: |
-          npx prettier --check "**/*.md"
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+          Import-Module Pester -RequiredVersion $env:PESTER_VERSION
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          Invoke-Pester -Configuration $config
+
+      - name: Verify Markdown LF line endings & encoding
+        shell: pwsh
+        run: ./scripts/guardrails/check-markdown.ps1
+
+      - name: Verify Prettier Markdown formatting
+        if: runner.os == 'Linux'
+        run: npx --yes "prettier@${PRETTIER_VERSION}" --check "**/*.md"
+
+  governance-gate:
+    # Dogfoods the reusable gate that downstream repositories call.
+    uses: ./.github/workflows/governance-gate.yml
+    permissions:
+      contents: read

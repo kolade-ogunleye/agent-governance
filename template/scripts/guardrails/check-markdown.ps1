@@ -1,5 +1,5 @@
 # check-markdown.ps1 - Markdown & Line-Ending Guardrail (RFC 2119)
-# Validates LF line endings, zero-BOM UTF-8, and Prettier formatting compliance on markdown files.
+# Validates LF line endings and zero-BOM UTF-8 on markdown files (Prettier formatting is checked in CI).
 
 $ErrorActionPreference = 'Stop'
 
@@ -10,8 +10,12 @@ if (-not $repoRoot) { exit 0 }
 $stagedFiles = (git -C $repoRoot diff --cached --name-only --diff-filter=ACM 2>$null) -split "`r?`n" | Where-Object { $_ -match '\.md$' -or $_ -match '\.template$' }
 
 if (-not $stagedFiles -or $stagedFiles.Count -eq 0 -or ($stagedFiles.Count -eq 1 -and [string]::IsNullOrWhiteSpace($stagedFiles[0]))) {
-    # If no staged markdown, check all tracked markdown files in small repos, or skip
-    $mdFiles = Get-ChildItem -Path $repoRoot -Filter "*.md" -Recurse -File | Where-Object { $_.FullName -notmatch '[\\/](\.git|node_modules|vendor)[\\/]' }
+    # No staged markdown: check every markdown file git would commit (tracked, or untracked but not ignored).
+    # Ignored files such as local session ledgers are never committed, so they are out of scope.
+    $mdFiles = @(git -C $repoRoot ls-files --cached --others --exclude-standard -- '*.md' 2>$null) | ForEach-Object {
+        $p = Join-Path $repoRoot $_
+        if (Test-Path -LiteralPath $p -PathType Leaf) { Get-Item -LiteralPath $p }
+    }
 } else {
     $mdFiles = $stagedFiles | ForEach-Object {
         $p = Join-Path $repoRoot $_
@@ -41,7 +45,7 @@ foreach ($file in $mdFiles) {
 }
 
 if ($hasErrors) {
-    Write-Host "`n⚠️ Run 'Set-Utf8LfContent' or format with Prettier to normalize line endings to LF." -ForegroundColor Yellow
+    Write-Host "`n⚠️ Re-save as UTF-8 without BOM with LF line endings (e.g. 'npx prettier --write <file>' or 'git add --renormalize .')." -ForegroundColor Yellow
     exit 1
 }
 
