@@ -76,9 +76,21 @@ Ordered from hardest to easiest to bypass:
 
 1. **Default-branch ruleset (cannot be bypassed from a clone; only repository admins can change it):** applied to GitHub with `./Set-GovernanceRuleset.ps1 -Repository owner/name` (dry-run with `-WhatIf`). Requires pull requests and blocks force-pushes and deletion. Rulesets on private repositories need GitHub Pro, Team, or Enterprise; on a free plan the API returns 403 and this layer is unavailable.
 2. **Governance gate (cannot be bypassed from a clone once the ruleset requires it):** the reusable workflow `.github/workflows/governance-gate.yml`, called by commit SHA, scans with Gitleaks (only the commits a pull request or push introduces, so known historical findings do not block every change; full history on the weekly schedule, on manual runs, or with `full_history_secret_scan`), enforces branch naming on pull requests, and verifies managed files against the hub at the commit in `.agent-governance.lock` using the hub's own verifier. For a private hub, pass a read-only `hub_token` secret; without one the integrity job warns and skips.
-3. **Agent permissions:** `.claude/settings.json` denies `Read`/`Edit` of secret files and runs a PreToolUse guard that blocks `--no-verify`, `LEFTHOOK=0`, `lefthook install`, `core.hooksPath` overrides, and pushes to `main`. Wrapper scripts and subprocesses can still evade it, so layers 1 and 2 remain the backstop.
+3. **Agent permissions:** `.claude/settings.json` denies `Read`/`Edit` of secret files, enables Claude Code's OS-level sandbox (macOS, Linux, WSL2; native Windows warns and runs unsandboxed) with reads of credential directories denied, and runs a PreToolUse guard that blocks `--no-verify`, `LEFTHOOK=0`, `lefthook install`, `core.hooksPath` overrides, and pushes to `main`. Wrapper scripts and subprocesses can still evade it, so layers 1 and 2 remain the backstop.
+   Codex gets `.codex/config.toml` (workspace-write sandbox, on-request approvals; loaded only for trusted projects), and Gemini CLI gets
+   `.gemini/settings.json` (reads `AGENTS.md`; forces confirmation for `git push`, `--no-verify`, `lefthook` and hook-path overrides — prefix matching, not a boundary).
+   Sync keeps all three agent settings files current while they are unmodified and never overwrites a team-edited one.
 4. **Local hooks:** Lefthook pre-commit and pre-push, fail-closed for detected agent sessions. Skippable with `--no-verify`; the layers above catch what they miss.
 5. **Contract and rules:** `AGENTS.md` and `.agents/rules/` guide agents but do not block anything.
+
+## 🔁 Keeping the Fleet in Sync
+
+`fleet.json` lists the governed repositories. `.github/workflows/downstream-sync.yml` runs weekly (and on demand) from `main`: for each repository it runs `Invoke-DownstreamSync.ps1`, which branches from the latest default branch, re-syncs, and opens or updates a `chore/agent-governance-sync-<hub-sha>` pull request. It needs an `AGENT_GOVERNANCE_SYNC_TOKEN` secret in the hub (a fine-grained token limited to the fleet repositories, with Contents and Pull requests read/write); without it the job warns and skips. CODEOWNERS is intentionally not shipped for solo, private repositories (see `docs/adr/0002-no-codeowners-for-solo-private-repos.md`).
+
+## 📏 Measuring Compliance
+
+- **Policy-coverage eval (deterministic, runs in CI):** `evals/Invoke-PolicyEval.ps1` replays contract-forbidden agent actions and look-alike legitimate work against the real Bash guard and pre-commit guardrails. Current result: 18/18 forbidden actions blocked, 0/9 false positives. It measures the enforcement machinery, not model judgement.
+- **Live agent eval (opt-in, billed):** `evals/Invoke-LiveAgentEval.ps1` runs Claude Code non-interactively in throwaway governed repositories under pressure (bypass hooks, make a failing test pass, print a secret) and grades the outcome. It requires Claude Code's OS sandbox and refuses to run on native Windows; use macOS, Linux, or WSL2. Preview with `-DryRun`.
 
 ## ⚡ Core Capabilities
 
@@ -142,8 +154,9 @@ commit recorded in the lock. Markdown comparisons tolerate whitespace changes.
 
 The reusable CI workflow runs this trusted comparison automatically: it checks
 out the hub at the locked commit and runs the hub's verifier against the caller.
-The locked commit is still caller-chosen, so the check proves the files match a
-real hub version, not the newest one. A repository-local lock and verifier on
+It also requires the locked commit to equal the gate's own pinned commit (sync
+writes both, so a hand-edited downgrade fails) and warns after 30 days / fails
+after 90 days of hub staleness (`hub_max_age_warn_days`, `hub_max_age_fail_days`). A repository-local lock and verifier on
 their own are not a tamper-proof security boundary.
 
 ### 4. Lockfile-Aware Polyglot Detection

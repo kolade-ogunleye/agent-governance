@@ -41,6 +41,74 @@ AfterAll {
     }
 }
 
+Describe 'Managed Claude Code settings propagation' {
+    BeforeAll {
+        function Publish-HubSettingsChange {
+            # A newer hub version of the settings template, committed and pushed.
+            $template = Join-Path $HubRoot 'template/.claude/settings.json'
+            $json = Get-Content $template -Raw | ConvertFrom-Json
+            $json | Add-Member -NotePropertyName 'cleanupPeriodDays' -NotePropertyValue 30 -Force
+            # LF only: ConvertTo-Json emits CRLF on Windows, which the template's eol=lf rule rejects.
+            [System.IO.File]::WriteAllText($template, ((($json | ConvertTo-Json -Depth 10) -replace "`r`n", "`n") + "`n"))
+            git -C $HubRoot -c core.hooksPath=.git/no-hooks commit --quiet -am 'feat: settings v2'
+            if ($LASTEXITCODE -ne 0) { throw 'Fake hub settings commit failed.' }
+            git -C $HubRoot push --quiet origin main
+            if ($LASTEXITCODE -ne 0) { throw 'Fake hub push failed.' }
+            # Guard against a vacuous pass: the engine must see a clean, pushed hub.
+            "$(git -C $HubRoot status --porcelain -- template)".Trim() | Should -BeNullOrEmpty
+        }
+    }
+
+    BeforeEach {
+        $script:Repo = New-TestRepo -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
+        $script:SettingsPath = Join-Path $Repo '.claude/settings.json'
+        $script:HubBaseline = "$(git -C $HubRoot rev-parse HEAD)".Trim()
+    }
+
+    AfterEach {
+        # Undo the published v2 locally and on the fake remote, so later tests see the baseline hub.
+        git -C $HubRoot reset --quiet --hard $HubBaseline
+        git -C $HubRoot push --quiet --force origin main
+    }
+
+    It 'updates an unmodified engine-written settings file to the newer hub version' {
+        Sync-AgentGovernance -RepoPath $Repo 6>$null 3>$null
+        Publish-HubSettingsChange
+
+        Sync-AgentGovernance -RepoPath $Repo 6>$null 3>$null
+
+        (Get-Content $SettingsPath -Raw | ConvertFrom-Json).cleanupPeriodDays | Should -Be 30
+    }
+
+    It 'updates a settings file that matches an earlier hub version even without a lock entry' {
+        Sync-AgentGovernance -RepoPath $Repo 6>$null 3>$null
+        $lockPath = Join-Path $Repo '.agent-governance.lock'
+        $lock = Get-Content $lockPath -Raw | ConvertFrom-Json
+        $lock.files.PSObject.Properties.Remove('.claude/settings.json')
+        [System.IO.File]::WriteAllText($lockPath, ($lock | ConvertTo-Json -Depth 5))
+        Publish-HubSettingsChange
+
+        Sync-AgentGovernance -RepoPath $Repo 6>$null 3>$null
+
+        (Get-Content $SettingsPath -Raw | ConvertFrom-Json).cleanupPeriodDays | Should -Be 30
+    }
+
+    It 'keeps a team-edited settings file and warns' {
+        Sync-AgentGovernance -RepoPath $Repo 6>$null 3>$null
+        $edited = (Get-Content $SettingsPath -Raw | ConvertFrom-Json)
+        $edited | Add-Member -NotePropertyName 'model' -NotePropertyValue 'team-choice' -Force
+        [System.IO.File]::WriteAllText($SettingsPath, ($edited | ConvertTo-Json -Depth 10) + "`n")
+        Publish-HubSettingsChange
+
+        $warnings = Sync-AgentGovernance -RepoPath $Repo 6>$null 3>&1 | ForEach-Object { "$_" }
+
+        $after = Get-Content $SettingsPath -Raw | ConvertFrom-Json
+        $after.model | Should -Be 'team-choice'
+        $after.PSObject.Properties['cleanupPeriodDays'] | Should -BeNullOrEmpty
+        ($warnings -join "`n") | Should -Match 'settings\.json'
+    }
+}
+
 Describe 'Managed governance-gate caller workflow' {
     BeforeEach {
         $script:Repo = New-TestRepo -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))

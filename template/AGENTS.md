@@ -45,7 +45,7 @@ Before generating, modifying, or refactoring code in any language, you MUST load
 
 ## 6. SECURITY & CONTEXT BOUNDARIES
 
-1. **Scope Limit:** All operations MUST remain strictly within this repository root. NEVER inspect or access `~/.ssh`, `~/.aws`, `~/.gnupg`, or parent directories.
+1. **Scope Limit:** All operations MUST remain strictly within this repository root. NEVER inspect or access `~/.ssh`, `~/.aws`, `~/.gnupg`, or parent directories. The Claude Code sandbox enforces the credential-directory denials at the OS level on macOS, Linux, and WSL2.
 2. **Secret Shield:** NEVER read, edit, print, or commit `.env*`, private keys (`.pem`, `.key`, `.id_*`), certificates, or tokens. Enforced by `.claude/settings.json` deny rules and the `detect-secrets` pre-commit hook.
 
 ## 7. DEFINITION OF DONE (MANDATORY GATE)

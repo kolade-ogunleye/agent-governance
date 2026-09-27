@@ -81,6 +81,24 @@ Describe 'Universal contract (template/AGENTS.md)' {
     }
 }
 
+Describe 'Lefthook configuration' {
+    BeforeAll {
+        $script:Lefthook = Get-Content (Join-Path $RepoRoot 'template' 'lefthook.yml') -Raw
+    }
+
+    It 'runs the independent pre-commit guardrails in parallel' {
+        $Lefthook | Should -Match '(?ms)^pre-commit:\s*\n(?:\s*#[^\n]*\n)*\s+parallel: true'
+    }
+
+    It 'keeps every pre-commit guardrail: <_>' -ForEach @('check-drift', 'check-markdown', 'protect-main', 'detect-secrets', 'guard-tests') {
+        $Lefthook | Should -Match "(?m)^\s+${_}:\s*$"
+    }
+
+    It 'is mirrored exactly by the hub''s own lefthook.yml' {
+        Get-Content (Join-Path $RepoRoot 'lefthook.yml') -Raw | Should -BeExactly $Lefthook
+    }
+}
+
 Describe 'check-drift.ps1 rule coverage' {
     BeforeEach {
         $script:Repo = New-TestRepo -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))

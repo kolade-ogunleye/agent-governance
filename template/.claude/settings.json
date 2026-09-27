@@ -35,6 +35,22 @@
       "Edit(credentials.json)"
     ]
   },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": false,
+    "filesystem": {
+      "denyRead": [
+        "~/.ssh",
+        "~/.aws",
+        "~/.gnupg",
+        "~/.config/gh",
+        "~/.git-credentials",
+        "./**/.env",
+        "./**/*.pem",
+        "./**/*.key"
+      ]
+    }
+  },
   "hooks": {
     "PreToolUse": [
       {

@@ -82,6 +82,19 @@ Describe 'Claude Code settings template' {
         $deny.IndexOf('Read(!.env.example)') | Should -BeGreaterThan $deny.IndexOf('Read(.env.*)')
     }
 
+    It 'enables the OS sandbox without auto-approving sandboxed commands' {
+        $Settings.sandbox.enabled | Should -BeTrue
+        $Settings.sandbox.autoAllowBashIfSandboxed | Should -BeFalse
+    }
+
+    It 'keeps the sandbox warn-and-continue on unsupported platforms such as native Windows' {
+        $Settings.sandbox.PSObject.Properties['failIfUnavailable'] | Should -BeNullOrEmpty
+    }
+
+    It 'denies sandboxed reads of <_>' -ForEach @('~/.ssh', '~/.aws', '~/.gnupg', '~/.config/gh', '~/.git-credentials', './**/.env') {
+        $Settings.sandbox.filesystem.denyRead | Should -Contain $_
+    }
+
     It 'wires the Bash guard as a PreToolUse hook for Bash and PowerShell in exec form' {
         $entry = @($Settings.hooks.PreToolUse)[0]
         $entry.matcher | Should -Be 'Bash|PowerShell'
@@ -128,17 +141,8 @@ Describe 'Governance gate workflow' {
 Describe 'Governance gate secret-scan range selection' {
     BeforeAll {
         # Extract the shipped run block of the "Scan for secrets" step, so the test exercises the real script.
-        $lines = Get-Content (Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml')
-        $step = [array]::FindIndex([string[]]$lines, [Predicate[string]] { param($l) $l -match '^\s+- name: Scan for secrets\s*$' })
-        $runIdx = $step + 1
-        while ($lines[$runIdx] -notmatch '^\s+run: \|\s*$') { $runIdx++ }
-        $indent = ($lines[$runIdx + 1] -replace '^(\s*).*', '$1').Length
-        $body = [System.Collections.Generic.List[string]]::new()
-        for ($i = $runIdx + 1; $i -lt $lines.Count -and ($lines[$i] -eq '' -or ($lines[$i] -replace '^(\s*).*', '$1').Length -ge $indent); $i++) {
-            $body.Add($(if ($lines[$i].Length -ge $indent) { $lines[$i].Substring($indent) } else { '' }))
-        }
         $script:ScanScript = Join-Path $TestDrive 'scan-for-secrets.sh'
-        [System.IO.File]::WriteAllText($ScanScript, ($body -join "`n") + "`n")
+        [System.IO.File]::WriteAllText($ScanScript, (Get-WorkflowStepScript -WorkflowPath (Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml') -StepName 'Scan for secrets'))
 
         # Git's own bash on Windows (a bare 'bash' may resolve to WSL); system bash elsewhere.
         $script:Bash = 'bash'
@@ -205,6 +209,92 @@ Describe 'Governance gate secret-scan range selection' {
         $r.Args | Should -Not -Match '--log-opts'
         $r.Args | Should -Match '^git --no-banner --redact --exit-code 1 \.'
         Join-Path $Repo 'pwned' | Should -Not -Exist
+    }
+}
+
+Describe 'Governance gate hub pin consistency and freshness' {
+    BeforeAll {
+        $script:CheckScript = Join-Path $TestDrive 'check-hub-pin.ps1'
+        [System.IO.File]::WriteAllText($CheckScript, (Get-WorkflowStepScript -WorkflowPath (Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml') -StepName 'Check hub pin consistency and freshness'))
+
+        function New-HubCheckout {
+            [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Creates disposable fixtures inside Pester TestDrive only.')]
+            param([int]$AgeDays)
+            # A checkout whose HEAD commit is $AgeDays old, standing in for _governance_hub.
+            $dir = Join-Path $TestDrive ("hub-" + [guid]::NewGuid().ToString('N'))
+            New-TestRepo -Path $dir | Out-Null
+            $date = [DateTimeOffset]::UtcNow.AddDays(-$AgeDays).ToString('yyyy-MM-ddTHH:mm:ssZ')
+            $env:GIT_COMMITTER_DATE = $date; $env:GIT_AUTHOR_DATE = $date
+            try { git -C $dir -c core.hooksPath=.git/no-hooks commit --quiet --allow-empty -m 'chore: dated' }
+            finally { $env:GIT_COMMITTER_DATE = $null; $env:GIT_AUTHOR_DATE = $null }
+            return [pscustomobject]@{ Dir = $dir; Sha = "$(git -C $dir rev-parse HEAD)".Trim() }
+        }
+
+        function Invoke-PinCheck {
+            param([string]$HubDir, [string]$LockCommit, [string]$GateSha, [string]$WarnDays = '30', [string]$FailDays = '90')
+            $vars = @{ HUB_DIR = $HubDir; LOCK_COMMIT = $LockCommit; GATE_SHA = $GateSha; WARN_DAYS = $WarnDays; FAIL_DAYS = $FailDays }
+            $saved = @{}
+            foreach ($k in $vars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $vars[$k]) }
+            try {
+                $out = & pwsh -NoProfile -File $CheckScript 2>&1
+                return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out -join "`n") }
+            } finally {
+                foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
+            }
+        }
+    }
+
+    It 'passes when the lock matches the gate pin and the hub commit is fresh' {
+        $hub = New-HubCheckout -AgeDays 2
+        (Invoke-PinCheck -HubDir $hub.Dir -LockCommit $hub.Sha -GateSha $hub.Sha).ExitCode | Should -Be 0
+    }
+
+    It 'fails when the lock commit differs from the gate pin (downgrade or partial edit)' {
+        $hub = New-HubCheckout -AgeDays 2
+        $r = Invoke-PinCheck -HubDir $hub.Dir -LockCommit $hub.Sha -GateSha ('b' * 40)
+        $r.ExitCode | Should -Be 1
+        $r.Output | Should -Match 'does not match the gate pin'
+    }
+
+    It 'warns but passes when the hub commit is older than the warning age' {
+        $hub = New-HubCheckout -AgeDays 45
+        $r = Invoke-PinCheck -HubDir $hub.Dir -LockCommit $hub.Sha -GateSha $hub.Sha
+        $r.ExitCode | Should -Be 0
+        $r.Output | Should -Match '::warning::'
+    }
+
+    It 'fails when the hub commit is older than the failure age' {
+        $hub = New-HubCheckout -AgeDays 120
+        $r = Invoke-PinCheck -HubDir $hub.Dir -LockCommit $hub.Sha -GateSha $hub.Sha
+        $r.ExitCode | Should -Be 1
+        $r.Output | Should -Match 'older than 90 days'
+    }
+
+    It 'skips the pin comparison when the gate runs from a local path (no SHA available)' {
+        $hub = New-HubCheckout -AgeDays 2
+        (Invoke-PinCheck -HubDir $hub.Dir -LockCommit $hub.Sha -GateSha '').ExitCode | Should -Be 0
+    }
+}
+
+Describe 'Codex and Gemini agent settings templates' {
+    It 'pins Codex to the workspace-write sandbox with on-request approvals' {
+        $toml = Get-Content (Join-Path $RepoRoot 'template' '.codex' 'config.toml') -Raw
+        $toml | Should -Match '(?m)^sandbox_mode = "workspace-write"$'
+        $toml | Should -Match '(?m)^approval_policy = "on-request"$'
+        $toml | Should -Not -Match 'danger-full-access'
+    }
+
+    It 'points Gemini CLI at AGENTS.md and forces confirmation for <_>' -ForEach @(
+        'run_shell_command(git push)', 'run_shell_command(git commit --no-verify)', 'run_shell_command(lefthook)'
+    ) {
+        $gemini = Get-Content (Join-Path $RepoRoot 'template' '.gemini' 'settings.json') -Raw | ConvertFrom-Json
+        $gemini.context.fileName | Should -Contain 'AGENTS.md'
+        $gemini.tools.confirmationRequired | Should -Contain $_
+    }
+
+    It 'leaves the Gemini sandbox unset (its behaviour without a container runtime is undocumented)' {
+        $gemini = Get-Content (Join-Path $RepoRoot 'template' '.gemini' 'settings.json') -Raw | ConvertFrom-Json
+        $gemini.tools.PSObject.Properties['sandbox'] | Should -BeNullOrEmpty
     }
 }
 
