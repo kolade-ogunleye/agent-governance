@@ -645,6 +645,16 @@ fi
             Copy-Item (Join-Path $hubDir ".agents\rules\*") $agentsRulesDir -Force
             Copy-Item (Join-Path $hubDir "scripts\guardrails\*") $scriptsDir -Force
 
+            # 5b. Agent-native enforcement: Claude Code deny rules + PreToolUse Bash guard.
+            # Project settings are team-owned, so an existing file is never overwritten.
+            $targetClaudeSettings = Join-Path $claudeDir "settings.json"
+            if (-not (Test-Path $targetClaudeSettings)) {
+                Copy-Item (Join-Path $hubDir ".claude" "settings.json") $targetClaudeSettings
+                Write-Host "  ✔️ Installed Claude Code secret deny rules and Bash guard hook (.claude/settings.json)"
+            } elseif ((Get-Content $targetClaudeSettings -Raw) -notmatch 'agent-bash-guard\.ps1') {
+                Write-Warning "Kept existing .claude/settings.json; merge template/.claude/settings.json into it to enable agent guardrails."
+            }
+
             # 6. Auto-detect stack & generate rich PROJECT.md if missing or unpopulated
             $targetProjectFile = Join-Path $resolvedDir "PROJECT.md"
             $shouldGenerateProject = $true

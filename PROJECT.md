@@ -30,6 +30,10 @@ This repository maintains the canonical multi-agent governance standards, determ
   - `template/.agents/rules/`: Progressive Disclosure domain rules (`languages.md`, `security-performance.md`).
   - `template/scripts/guardrails/`: Deterministic security scripts executed by Lefthook.
   - `template/lefthook.yml`: Deterministic hook configuration.
+  - `template/.claude/settings.json`: Claude Code secret deny rules + PreToolUse Bash guard (deployed only when a repo has none).
 - `Sync-AgentGovernance.ps1`: The orchestration and reconciliation engine.
+- `Set-GovernanceRuleset.ps1` + `rulesets/`: Server-side default-branch ruleset (non-bypassable layer). Dry-run first: `./Set-GovernanceRuleset.ps1 -Repository owner/name -WhatIf`.
+- `.github/workflows/governance-gate.yml`: Reusable CI gate (full-history Gitleaks, PR branch policy) for downstream repositories to call by commit SHA.
+- `tests/`: Pester suite for the engine, guardrails, and enforcement layers.
 - `WORKING.md`: Ephemeral session continuity ledger (local working memory, shielded from git).
 - `.agents/state/`: Branch-grounded state archive for multi-branch session persistence.

@@ -101,6 +101,23 @@ Describe 'Sync-AgentGovernance' -Skip:(-not $IsWindows) {
         git -C $Repo log -1 --format=%s | Should -Be 'chore(governance): install unified agent contract and deterministic guardrails'
     }
 
+    Context 'plan Phase 4 agent-native enforcement' {
+        It 'deploys the Claude Code settings template when the repo has none' {
+            Invoke-QuietSync -RepoPath $Repo
+
+            (Get-Content (Join-Path $Repo '.claude/settings.json') -Raw) | Should -BeExactly (Get-Content (Join-Path $HubDir '.claude/settings.json') -Raw)
+            Join-Path $Repo 'scripts/guardrails/agent-bash-guard.ps1' | Should -Exist
+        }
+
+        It 'never overwrites an existing project .claude/settings.json' {
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.claude/settings.json' = '{ "model": "custom" }' }
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            (Get-Content (Join-Path $Repo '.claude/settings.json') -Raw) | Should -BeExactly '{ "model": "custom" }'
+        }
+    }
+
     Context 'plan Phase 2 regressions' {
         It 'adds *.key to an existing .gitignore that already lists *.keystore (plan defect 4)' {
             Add-FixtureCommit -RepoPath $Repo -Files @{ '.gitignore' = "*.keystore`n" }

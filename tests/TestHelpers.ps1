@@ -66,6 +66,24 @@ function New-CommandShim {
     }
 }
 
+function Invoke-HookScript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptPath,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$InputText
+    )
+
+    # Mirrors how Claude Code invokes a command hook: JSON payload on stdin.
+    $output = $InputText | & pwsh -NoProfile -File $ScriptPath 2>&1
+    return [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Output   = ($output -join "`n")
+    }
+}
+
 function Invoke-Guardrail {
     [CmdletBinding()]
     param(

@@ -1,0 +1,56 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(!.env.example)",
+      "Read(!.env.sample)",
+      "Read(!.env.template)",
+      "Read(*.pem)",
+      "Read(*.key)",
+      "Read(*.p12)",
+      "Read(*.pfx)",
+      "Read(*.keystore)",
+      "Read(*.jks)",
+      "Read(id_rsa)",
+      "Read(id_dsa)",
+      "Read(id_ecdsa)",
+      "Read(id_ed25519)",
+      "Read(credentials.json)",
+      "Edit(.env)",
+      "Edit(.env.*)",
+      "Edit(!.env.example)",
+      "Edit(!.env.sample)",
+      "Edit(!.env.template)",
+      "Edit(*.pem)",
+      "Edit(*.key)",
+      "Edit(*.p12)",
+      "Edit(*.pfx)",
+      "Edit(*.keystore)",
+      "Edit(*.jks)",
+      "Edit(id_rsa)",
+      "Edit(id_dsa)",
+      "Edit(id_ecdsa)",
+      "Edit(id_ed25519)",
+      "Edit(credentials.json)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh",
+            "args": [
+              "-NoProfile",
+              "-File",
+              "${CLAUDE_PROJECT_DIR}/scripts/guardrails/agent-bash-guard.ps1"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

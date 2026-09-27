@@ -12,8 +12,6 @@ permissions:
 env:
   PESTER_VERSION: "6.2.0"
   PSSA_VERSION: "1.25.0"
-  GITLEAKS_VERSION: "8.30.1"
-  GITLEAKS_LINUX_X64_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   PRETTIER_VERSION: "3.9.9"
   # Warnings still present in the engine; each later plan phase lowers this ratchet toward 0.
   PSSA_WARNING_BASELINE: "1"
@@ -89,23 +87,8 @@ jobs:
         if: runner.os == 'Linux'
         run: npx --yes "prettier@${PRETTIER_VERSION}" --check "**/*.md"
 
-  secret-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code (full history)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install pinned Gitleaks (checksum verified)
-        run: |
-          set -euo pipefail
-          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -sSfL -o "$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
-          echo "${GITLEAKS_LINUX_X64_SHA256}  ${archive}" | sha256sum --check --strict
-          tar -xzf "$archive" gitleaks
-          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
-
-      - name: Scan full history for secrets
-        run: gitleaks git --no-banner --redact --exit-code 1 .
+  governance-gate:
+    # Dogfoods the reusable gate that downstream repositories call.
+    uses: ./.github/workflows/governance-gate.yml
+    permissions:
+      contents: read

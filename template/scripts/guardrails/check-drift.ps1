@@ -19,6 +19,7 @@ try {
         "lefthook.yml",
         ".agents/rules/languages.md",
         ".agents/rules/security-performance.md",
+        "scripts/guardrails/agent-bash-guard.ps1",
         "scripts/guardrails/check-drift.ps1",
         "scripts/guardrails/check-markdown.ps1",
         "scripts/guardrails/protect-main.ps1",
