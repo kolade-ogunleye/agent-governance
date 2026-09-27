@@ -28,7 +28,7 @@ Before modifying any files or presenting your plan, you MUST adopt a **Devil's A
 ## 3. PROJECT CONTEXT & LAYERED ARCHITECTURE
 
 1. **Project Specification:** Before undertaking work, you MUST read `PROJECT.md` at the repository root for repository-specific architecture, tech stack, build commands, and test targets.
-2. **Precedence & Dual-Contract:** Universal operating rules in this contract ALWAYS take absolute precedence over repository-specific instructions in case of conflict. However, domain instructions (e.g. in `PROJECT.md` or `docs/LEGACY-AGENT-NOTES.md`) retain authoritative control over application business logic, domain models, workflows, and task sequencing. Agents MUST cite both universal standards and domain-specific notes in their implementation plan.
+2. **Precedence & Dual-Contract:** Universal operating rules in this contract ALWAYS take absolute precedence over repository-specific instructions in case of conflict. However, domain instructions (e.g. in `PROJECT.md`, `HANDOVER.md`, or `docs/LEGACY-AGENT-NOTES.md`) retain authoritative control over application business logic, domain models, workflows, and task sequencing. Agents MUST cite both universal standards and domain-specific notes in their implementation plan.
 
 ## 4. PROGRESSIVE DISCLOSURE & MANDATORY CITATION GATE
 
@@ -66,3 +66,4 @@ Before declaring any task complete, you MUST execute and report the output of:
    - Record exact in-flight file state and uncommitted changes.
    - Record the precise `next_action` command for the successor agent.
 3. **Definition of Done Cleanup:** Upon successfully passing all lint/test gates and completing the task, the agent MUST remove `WORKING.md` (or mark `session_status: COMPLETED` and archive it) so stale state does not persist into future tasks.
+4. **Permanent Handover Invariant:** Permanent, committed architecture documentation (e.g., `HANDOVER.md`, `docs/CURRENT-STATE.md` indexed in `PROJECT.md`) MUST NEVER be confused with or overwritten by ephemeral task ledgers. Only `WORKING.md` serves as the local, task-scoped checkpoint.

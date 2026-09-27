@@ -272,8 +272,23 @@ EXAMPLES:
             $runbook["Docker Compose"] = "docker compose up -d"
         }
 
-        if ($types.Count -eq 0) {
-            $types.Add("General / Multi-purpose")
+        # 8. Operational Handover & Architecture Document Detection
+        $handoverCandidates = @(
+            "HANDOVER.md",
+            "docs/CURRENT-STATE.md",
+            "docs/RELEASE-HANDOFF.md",
+            "docs/OPERATIONS.md",
+            "CURRENT-STATE.md",
+            "docs/HANDOVER.md",
+            "docs/ARCHITECTURE.md"
+        )
+        $detectedHandover = $null
+        foreach ($candidate in $handoverCandidates) {
+            $candidatePath = Join-Path $targetDir $candidate
+            if (Test-Path $candidatePath) {
+                $detectedHandover = $candidate
+                break
+            }
         }
 
         return @{
@@ -282,6 +297,7 @@ EXAMPLES:
             Frameworks = ($frameworks -join ", ")
             PackageManagers = ($packageManagers -join ", ")
             Runbook = $runbook
+            OperationalHandover = $detectedHandover
         }
     }
 
@@ -573,15 +589,28 @@ fi
                 $pMd.Add("It is consulted by coding agents alongside the universal operating contract (`AGENTS.md`).")
                 $pMd.Add("")
 
-                if ((Test-Path (Join-Path $docsDir "LEGACY-AGENT-NOTES.md")) -or $hasPreservedLegacy) {
+                $hasLegacy = (Test-Path (Join-Path $docsDir "LEGACY-AGENT-NOTES.md")) -or $hasPreservedLegacy
+                $hasHandover = [bool]$stack.OperationalHandover
+
+                if ($hasHandover -or $hasLegacy) {
                     $pMd.Add("---")
                     $pMd.Add("")
-                    $pMd.Add("## 0. Legacy & Historical Agent Instructions")
+                    $pMd.Add("## 0. Operational Context & Historical Directives")
                     $pMd.Add("")
-                    $pMd.Add("> [!NOTE]")
-                    $pMd.Add("> Pre-existing custom repository instructions were archived to [`docs/LEGACY-AGENT-NOTES.md`](docs/LEGACY-AGENT-NOTES.md).")
-                    $pMd.Add("> Agents MUST consult this document for historical architectural context, design decisions, and domain conventions.")
-                    $pMd.Add("")
+
+                    if ($hasHandover) {
+                        $pMd.Add("> [!IMPORTANT]")
+                        $pMd.Add("> Authoritative production architecture and live operational state is documented in [`$($stack.OperationalHandover)`]($($stack.OperationalHandover)).")
+                        $pMd.Add("> Coding agents MUST consult this document for domain invariants, service tiers, and deployment conventions.")
+                        $pMd.Add("")
+                    }
+
+                    if ($hasLegacy) {
+                        $pMd.Add("> [!NOTE]")
+                        $pMd.Add("> Pre-existing custom repository instructions were archived to [`docs/LEGACY-AGENT-NOTES.md`](docs/LEGACY-AGENT-NOTES.md).")
+                        $pMd.Add("> Agents MUST consult this document for historical architectural context, design decisions, and domain conventions.")
+                        $pMd.Add("")
+                    }
                 }
 
                 $pMd.Add("---")

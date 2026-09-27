@@ -4,6 +4,13 @@ This file contains repository-specific context, conventions, and operational run
 
 ---
 
+## 0. Operational Context & Historical Directives
+
+> [!IMPORTANT]
+> If this project maintains an authoritative operational state or master handover document (e.g., `HANDOVER.md`, `docs/CURRENT-STATE.md`), link it here. Agents must consult it for live architecture and domain invariants.
+
+---
+
 ## 1. Project Overview & Tech Stack
 
 - **Repository Name:** <project-name>
