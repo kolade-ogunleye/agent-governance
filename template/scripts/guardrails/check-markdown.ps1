@@ -1,5 +1,5 @@
 # check-markdown.ps1 - Markdown & Line-Ending Guardrail (RFC 2119)
-# Validates LF line endings, zero-BOM UTF-8, and Prettier formatting compliance on markdown files.
+# Validates LF line endings and zero-BOM UTF-8 on markdown files (Prettier formatting is checked in CI).
 
 $ErrorActionPreference = 'Stop'
 
@@ -41,7 +41,7 @@ foreach ($file in $mdFiles) {
 }
 
 if ($hasErrors) {
-    Write-Host "`n⚠️ Run 'Set-Utf8LfContent' or format with Prettier to normalize line endings to LF." -ForegroundColor Yellow
+    Write-Host "`n⚠️ Re-save as UTF-8 without BOM with LF line endings (e.g. 'npx prettier --write <file>' or 'git add --renormalize .')." -ForegroundColor Yellow
     exit 1
 }
 

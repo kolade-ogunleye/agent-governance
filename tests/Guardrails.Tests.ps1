@@ -27,9 +27,34 @@ Describe 'protect-main.ps1' {
         $result.Output | Should -Match 'semantic branching policy'
     }
 
-    It 'allows commits on a detached HEAD during rebase or bisect (plan defect 8)' -Skip {
+    It 'allows commits on a detached HEAD during rebase or bisect (plan defect 8)' {
         git -C $Repo checkout --quiet --detach
         (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+
+    It 'allows a nested semantic branch name (plan defect 8)' {
+        git -C $Repo checkout --quiet -b feat/payments/refund-flow
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+
+    It 'blocks a staged <Path> session ledger on a feature branch (plan defect 8)' -ForEach @(
+        @{ Path = 'WORKING.md' }, @{ Path = '.agents/state/feat-x.md' }
+    ) {
+        git -C $Repo checkout --quiet -b feat/ledger
+        $full = Join-Path $Repo $Path
+        New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
+        [System.IO.File]::WriteAllText($full, "ledger`n")
+        git -C $Repo add -f -- $Path
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'Ephemeral session ledger'
+    }
+
+    It 'blocks a staged session ledger on a detached HEAD (plan defect 8)' {
+        git -C $Repo checkout --quiet --detach
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'WORKING.md'), "ledger`n")
+        git -C $Repo add -f WORKING.md
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 1
     }
 }
 
@@ -56,8 +81,72 @@ Describe 'guard-tests.ps1' {
         (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
     }
 
-    It 'does not treat files merely containing "test" in their name as tests (plan defect 8)' -Skip {
+    It 'does not treat files merely containing "test" in their name as tests (plan defect 8)' {
         git -C $Repo rm --quiet src/latest.js
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+
+    It 'blocks deleting a test identified by <Name> convention (plan defect 8)' -ForEach @(
+        @{ Name = 'pytest prefix'; Path = 'pkg/test_models.py' }
+        @{ Name = 'Go suffix'; Path = 'internal/store_test.go' }
+        @{ Name = 'Pester suffix'; Path = 'scripts/Build.Tests.ps1' }
+        @{ Name = '__tests__ directory'; Path = 'src/__tests__/button.jsx' }
+        @{ Name = 'spec suffix'; Path = 'src/api.spec.ts' }
+    ) {
+        Add-FixtureCommit -RepoPath $Repo -Files @{ $Path = "placeholder`n" }
+        git -C $Repo rm --quiet -- $Path
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 1
+    }
+
+    It 'blocks renaming a test file out of the test suite (plan defect 8)' {
+        New-Item -ItemType Directory -Path (Join-Path $Repo 'archive') | Out-Null
+        git -C $Repo mv tests/app.test.js archive/app.js
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'tests/app.test.js'
+    }
+
+    It 'allows moving a test file within the test suite (plan defect 8)' {
+        New-Item -ItemType Directory -Path (Join-Path $Repo 'tests/unit') | Out-Null
+        git -C $Repo mv tests/app.test.js tests/unit/app.test.js
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+
+    It 'blocks adding a skip marker to an existing test (<Marker>) (plan defect 8)' -ForEach @(
+        @{ Marker = 'test.skip'; Line = "test.skip('y', () => {});" }
+        @{ Marker = 'xit'; Line = "xit('y', () => {});" }
+        @{ Marker = 'pytest.mark.skip'; Line = '@pytest.mark.skip(reason="flaky")' }
+    ) {
+        [System.IO.File]::AppendAllText((Join-Path $Repo 'tests/app.test.js'), "$Line`n")
+        git -C $Repo add tests/app.test.js
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'skip'
+    }
+
+    It 'allows adding a new, ordinary assertion to an existing test' {
+        [System.IO.File]::AppendAllText((Join-Path $Repo 'tests/app.test.js'), "test('z', () => { expect(1).toBe(1); });`n")
+        git -C $Repo add tests/app.test.js
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+
+    It 'ignores skip markers that appear inside string data' {
+        [System.IO.File]::AppendAllText((Join-Path $Repo 'tests/app.test.js'), "const fixture = `"test.skip('y', () => {});`";`n")
+        git -C $Repo add tests/app.test.js
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+
+    It 'blocks adding -Skip to an existing Pester test' {
+        Add-FixtureCommit -RepoPath $Repo -Files @{ 'tests/Build.Tests.ps1' = "Describe 'x' {`n    It 'works' {`n        1 | Should -Be 1`n    }`n}`n" }
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'tests/Build.Tests.ps1'), "Describe 'x' {`n    It 'works' -Skip {`n        1 | Should -Be 1`n    }`n}`n")
+        git -C $Repo add tests/Build.Tests.ps1
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 1
+    }
+
+    It 'allows removing a skip marker from an existing test' {
+        Add-FixtureCommit -RepoPath $Repo -Files @{ 'tests/flaky.test.js' = "test.skip('y', () => {});`n" }
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'tests/flaky.test.js'), "test('y', () => {});`n")
+        git -C $Repo add tests/flaky.test.js
         (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
     }
 }
@@ -216,11 +305,120 @@ Describe 'run-tests.ps1' {
         Join-Path $Repo '.ran-npm' | Should -Exist
     }
 
-    It 'runs every detected stack in a polyglot repository (plan defect 8)' -Skip {
+    It 'runs every detected stack in a polyglot repository (plan defect 8)' {
         [System.IO.File]::WriteAllText((Join-Path $Repo 'package.json'), '{ "scripts": { "test": "x" } }')
         [System.IO.File]::WriteAllText((Join-Path $Repo 'pyproject.toml'), "[project]`nname = 'fixture'`n")
         (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
         Join-Path $Repo '.ran-npm' | Should -Exist
         Join-Path $Repo '.ran-pytest' | Should -Exist
+    }
+
+    It 'still runs later suites when an earlier one fails, then fails overall (plan defect 8)' {
+        New-CommandShim -Directory $ShimDir -Name 'npm' -ExitCode 1 -MarkerPath (Join-Path $Repo '.ran-npm')
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'package.json'), '{ "scripts": { "test": "x" } }')
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'pyproject.toml'), "[project]`nname = 'fixture'`n")
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'Node\.js'
+        Join-Path $Repo '.ran-pytest' | Should -Exist
+    }
+
+    It 'skips a package.json without a test script' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'package.json'), '{ "scripts": { "build": "x" } }')
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+        Join-Path $Repo '.ran-npm' | Should -Not -Exist
+    }
+
+    It 'passes when no testable stack is present' {
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+}
+
+Describe 'check-drift.ps1' {
+    BeforeEach {
+        $script:Repo = New-TestRepo -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
+        $script:Guard = Join-Path $GuardDir 'check-drift.ps1'
+        $script:Hub = Join-Path $TestDrive ("hub-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $Hub | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $Hub 'AGENTS.md'), "# Contract`n`nRule one.`n")
+        $script:OriginalHub = $env:AGENT_GOVERNANCE_HUB
+        $env:AGENT_GOVERNANCE_HUB = $Hub
+    }
+
+    AfterEach {
+        $env:AGENT_GOVERNANCE_HUB = $OriginalHub
+    }
+
+    It 'stays silent and non-blocking when the hub is absent' {
+        $env:AGENT_GOVERNANCE_HUB = Join-Path $TestDrive 'no-such-hub'
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -BeNullOrEmpty
+    }
+
+    It 'reports drift without blocking when a governed file differs' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'AGENTS.md'), "# Contract`n`nRule two.`n")
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'drifted from the Central Hub'
+    }
+
+    It 'ignores whitespace-only markdown reformatting' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'AGENTS.md'), "# Contract`n`n`nRule   one.`n")
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).Output | Should -Not -Match 'drifted'
+    }
+}
+
+Describe 'audit-dependencies.ps1' {
+    BeforeEach {
+        $script:Repo = New-TestRepo -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
+        $script:Guard = Join-Path $GuardDir 'audit-dependencies.ps1'
+        $script:ShimDir = Join-Path $TestDrive ("shims-" + [guid]::NewGuid().ToString('N'))
+        foreach ($tool in @('pip-audit', 'uv', 'pnpm', 'npm')) {
+            New-CommandShim -Directory $ShimDir -Name $tool -MarkerPath (Join-Path $Repo ".args-$tool")
+        }
+        $script:OriginalPath = $env:PATH
+        $env:PATH = $ShimDir + [System.IO.Path]::PathSeparator + $env:PATH
+    }
+
+    AfterEach {
+        $env:PATH = $OriginalPath
+    }
+
+    It 'audits the locked dependencies of a uv project, not the auditor environment (plan defect 8)' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'pyproject.toml'), "[project]`nname = 'fixture'`n")
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'uv.lock'), "version = 1`n")
+
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+
+        Get-Content (Join-Path $Repo '.args-uv') -Raw | Should -Match '^export .*--format requirements\.txt.*--frozen'
+        Get-Content (Join-Path $Repo '.args-pip-audit') -Raw | Should -Match '-r \S+ --no-deps --disable-pip'
+    }
+
+    It 'audits requirements.txt directly when present (plan defect 8)' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'requirements.txt'), "requests==2.32.3`n")
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+        Get-Content (Join-Path $Repo '.args-pip-audit') -Raw | Should -Match '-r requirements\.txt'
+    }
+
+    It 'audits the local project path for a pyproject-only repository (plan defect 8)' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'pyproject.toml'), "[project]`nname = 'fixture'`n")
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+        (Get-Content (Join-Path $Repo '.args-pip-audit') -Raw).Trim() | Should -BeExactly '.'
+    }
+
+    It 'blocks the push when pip-audit reports vulnerabilities' {
+        New-CommandShim -Directory $ShimDir -Name 'pip-audit' -ExitCode 1
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'requirements.txt'), "requests==2.0.0`n")
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'vulnerabilities detected'
+    }
+
+    It 'audits a pnpm project with pnpm' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'package.json'), '{ "name": "fixture" }')
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'pnpm-lock.yaml'), "lockfileVersion: '9.0'`n")
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+        Get-Content (Join-Path $Repo '.args-pnpm') -Raw | Should -Match '^audit --audit-level=high'
     }
 }

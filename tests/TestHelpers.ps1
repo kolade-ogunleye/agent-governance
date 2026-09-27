@@ -52,13 +52,14 @@ function New-CommandShim {
         [string]$MarkerPath
     )
 
-    # A stand-in executable that optionally records its invocation, so tests need no real toolchain.
+    # A stand-in executable that optionally records its arguments (one invocation per line),
+    # so tests need no real toolchain.
     New-Item -ItemType Directory -Path $Directory -Force | Out-Null
     if ($IsWindows) {
-        $body = if ($MarkerPath) { "New-Item -ItemType File -Path '$MarkerPath' -Force | Out-Null`n" } else { '' }
+        $body = if ($MarkerPath) { "Add-Content -Path '$MarkerPath' -Value (`$args -join ' ')`n" } else { '' }
         [System.IO.File]::WriteAllText((Join-Path $Directory "$Name.ps1"), $body + "exit $ExitCode`n")
     } else {
-        $body = if ($MarkerPath) { "touch '$MarkerPath'`n" } else { '' }
+        $body = if ($MarkerPath) { "echo `"`$*`" >> '$MarkerPath'`n" } else { '' }
         $shim = Join-Path $Directory $Name
         [System.IO.File]::WriteAllText($shim, "#!/bin/sh`n" + $body + "exit $ExitCode`n")
         chmod +x $shim
