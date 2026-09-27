@@ -595,7 +595,53 @@ fi
                 $existingProject = Get-Content $targetProjectFile -Raw
                 if (-not ($existingProject -match '<e\.g\.,' -or $existingProject -match '<project-name>')) {
                     $shouldGenerateProject = $false
-                    Write-Host "  ✔️ Preserved existing customized PROJECT.md"
+
+                    # Reconcile Section 0 if missing and operational handover / lessons learned exist
+                    if ($existingProject -notmatch '## 0\.\s+Operational Context') {
+                        $stack = Detect-ProjectStack -targetDir $resolvedDir -repoName $repoName
+                        $hasLegacy = (Test-Path (Join-Path $docsDir "LEGACY-AGENT-NOTES.md")) -or $hasPreservedLegacy
+                        $hasHandover = [bool]$stack.OperationalHandover
+                        $hasLessons = [bool]$stack.LessonsLearned
+
+                        if ($hasHandover -or $hasLessons -or $hasLegacy) {
+                            $sec0 = [System.Collections.Generic.List[string]]::new()
+                            $sec0.Add("---")
+                            $sec0.Add("")
+                            $sec0.Add("## 0. Operational Context & Historical Directives")
+                            $sec0.Add("")
+                            if ($hasHandover) {
+                                $sec0.Add("> [!IMPORTANT]")
+                                $sec0.Add("> Authoritative production architecture and live operational state is documented in [`$($stack.OperationalHandover)`]($($stack.OperationalHandover)).")
+                                $sec0.Add("> Coding agents MUST consult this document for domain invariants, service tiers, and deployment conventions.")
+                                $sec0.Add("")
+                            }
+                            if ($hasLessons) {
+                                $sec0.Add("> [!WARNING]")
+                                $sec0.Add("> Critical domain traps and anti-regression directives are documented in [`$($stack.LessonsLearned)`]($($stack.LessonsLearned)).")
+                                $sec0.Add("> Agents MUST verify implementation plans against these lessons before proposing code or configuration changes.")
+                                $sec0.Add("")
+                            }
+                            if ($hasLegacy) {
+                                $sec0.Add("> [!NOTE]")
+                                $sec0.Add("> Pre-existing custom repository instructions were archived to [`docs/LEGACY-AGENT-NOTES.md`](docs/LEGACY-AGENT-NOTES.md).")
+                                $sec0.Add("> Agents MUST consult this document for historical architectural context, design decisions, and domain conventions.")
+                                $sec0.Add("")
+                            }
+                            $sec0Block = ($sec0 -join "`n") + "`n"
+
+                            if ($existingProject -match '(?m)^## 1\.') {
+                                $updatedProject = $existingProject -replace '(?m)^## 1\.', ($sec0Block + "## 1.")
+                            } else {
+                                $updatedProject = $existingProject.TrimEnd() + "`n`n" + $sec0Block
+                            }
+                            Set-Utf8LfContent -Path $targetProjectFile -Content $updatedProject
+                            Write-Host "  ✔️ Reconciled Section 0 Triad Hierarchy into existing PROJECT.md" -ForegroundColor Green
+                        } else {
+                            Write-Host "  ✔️ Preserved existing customized PROJECT.md"
+                        }
+                    } else {
+                        Write-Host "  ✔️ Preserved existing customized PROJECT.md"
+                    }
                 }
             }
 

@@ -13,7 +13,6 @@ if (-not $repoRoot) { exit 0 }
 $criticalFiles = @(
     "AGENTS.md",
     "lefthook.yml",
-    ".gitattributes",
     ".agents/rules/languages.md",
     ".agents/rules/security-performance.md",
     "scripts/guardrails/check-markdown.ps1",
