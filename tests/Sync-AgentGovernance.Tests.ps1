@@ -100,6 +100,34 @@ Describe 'Sync-AgentGovernance' {
         git -C $Repo log -1 --format=%s | Should -Be 'chore(governance): install unified agent contract and deterministic guardrails'
     }
 
+    Context 'downstream formatting' {
+        It 'warns when Prettier is configured but not installed' {
+            Add-FixtureCommit -RepoPath $Repo -Files @{
+                'package.json'      = '{ "name": "fixture", "devDependencies": { "prettier": "3.9.8" } }'
+                '.prettierrc.json'  = '{ "tabWidth": 4 }'
+            }
+
+            $warnings = Sync-AgentGovernance -RepoPath $Repo 6>$null 3>&1 | ForEach-Object { "$_" }
+
+            ($warnings -join "`n") | Should -Match 'Prettier is configured in this repository but not installed'
+        }
+
+        It 'formats the governed files with the repository''s own Prettier when installed' {
+            # node_modules is ignored in real repositories; untracked, it would trip the sync's safety gate.
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.prettierrc.json' = '{ "tabWidth": 4 }'; '.gitignore' = "node_modules/`n" }
+            $binDir = Join-Path $Repo 'node_modules/.bin'
+            $log = Join-Path $TestDrive ("prettier-" + [guid]::NewGuid().ToString('N') + '.log')
+            New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+            if ($IsWindows) { [System.IO.File]::WriteAllText((Join-Path $binDir 'prettier.cmd'), "@echo %* >> `"$log`"`r`n@exit /b 0`r`n") }
+            else { [System.IO.File]::WriteAllText((Join-Path $binDir 'prettier'), "#!/bin/sh`necho `"`$*`" >> '$log'`n"); chmod +x (Join-Path $binDir 'prettier') }
+
+            $warnings = Sync-AgentGovernance -RepoPath $Repo 6>$null 3>&1 | ForEach-Object { "$_" }
+
+            (Get-Content $log -Raw) | Should -Match '--write .*AGENTS\.md'
+            ($warnings -join "`n") | Should -Not -Match 'not installed'
+        }
+    }
+
     Context 'Codex and Gemini agent settings' {
         It 'installs the Codex and Gemini settings templates when absent' {
             Invoke-QuietSync -RepoPath $Repo

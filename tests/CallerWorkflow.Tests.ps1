@@ -125,6 +125,20 @@ Describe 'Managed governance-gate caller workflow' {
         $text | Should -Not -Match '__[A-Z_]+__'
     }
 
+    It 'passes the generated workflow to the repository''s Prettier' {
+        # node_modules is ignored in real repositories; untracked, it would trip the sync's safety gate.
+        Add-FixtureCommit -RepoPath $Repo -Files @{ '.gitignore' = "node_modules/`n" }
+        $binDir = Join-Path $Repo 'node_modules/.bin'
+        $log = Join-Path $TestDrive ("prettier-" + [guid]::NewGuid().ToString('N') + '.log')
+        New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+        if ($IsWindows) { [System.IO.File]::WriteAllText((Join-Path $binDir 'prettier.cmd'), "@echo %* >> `"$log`"`r`n@exit /b 0`r`n") }
+        else { [System.IO.File]::WriteAllText((Join-Path $binDir 'prettier'), "#!/bin/sh`necho `"`$*`" >> '$log'`n"); chmod +x (Join-Path $binDir 'prettier') }
+
+        Sync-AgentGovernance -RepoPath $Repo 6>$null 3>$null
+
+        (Get-Content $log -Raw) | Should -Match '\.github/workflows/agent-governance\.yml'
+    }
+
     It 'records the workflow in the lock so tampering is detected' {
         Sync-AgentGovernance -RepoPath $Repo 6>$null 3>$null
 

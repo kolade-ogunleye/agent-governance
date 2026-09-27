@@ -651,12 +651,16 @@ fi
     function Invoke-DownstreamFormatting {
         param([string]$targetDir)
 
+        # Includes the generated gate workflow: sync rewrites it each run, so only the engine can keep it formatted.
         $governedFiles = @(
             "AGENTS.md", "CLAUDE.md", "PROJECT.md", "WORKING.md",
-            "docs/LEGACY-AGENT-NOTES.md", ".github/copilot-instructions.md"
+            "docs/LEGACY-AGENT-NOTES.md", ".github/copilot-instructions.md",
+            ".github/workflows/agent-governance.yml"
         ) | Where-Object { Test-Path (Join-Path $targetDir $_) }
 
         if ($governedFiles.Count -eq 0) { return }
+        $prettierConfigured = [bool](Get-ChildItem -LiteralPath $targetDir -Force -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^\.prettierrc' -or $_.Name -match '^prettier\.config\.' })
 
         # 1. Local Prettier binary in node_modules
         $localPrettierCmd = Join-Path $targetDir "node_modules\.bin\prettier.cmd"
@@ -709,6 +713,11 @@ fi
                     Write-Verbose "npx Prettier failed in ${targetDir}: $($_.Exception.Message)"
                 }
             }
+            if ($hasPkgPrettier) { $prettierConfigured = $true }
+        }
+
+        if ($prettierConfigured) {
+            Write-Warning "Prettier is configured in this repository but not installed, so governed files were not formatted and its format check may fail. Install dependencies (e.g. npm ci) and re-run the sync."
         }
     }
 
