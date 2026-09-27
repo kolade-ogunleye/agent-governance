@@ -44,6 +44,8 @@ The engine is loaded into your PowerShell profile (`$PROFILE`) and provides rich
 Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
                      [-RepoPath|-r <path>]
                      [-All|-a]
+                     [-FleetRoot <path>]
+                     [-WhatIf]
                      [-AuditOnly|-m]
                      [-BranchAndCommit|-c]
                      [-Help|-h|-?]
@@ -84,6 +86,39 @@ Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
   ⚡ [Agent Governance] Local repository rules have drifted from the Central Hub.
      Run 'Sync-AgentGovernance' to synchronize with latest corporate standards.
   ```
+
+### Portable distribution and integrity verification
+
+Run `. ./Sync-AgentGovernance.ps1` to load the engine in PowerShell 7. Preview a
+repository update with `Sync-AgentGovernance -RepoPath <path> -WhatIf`. Fleet
+operations accept `-FleetRoot`; the default is `AGENT_GOVERNANCE_FLEET_ROOT`, or
+the directory containing the hub. Audit and preview modes do not write files.
+
+The engine deploys plain files so tool instructions survive Git checkouts:
+`CLAUDE.md` imports `AGENTS.md`, Copilot receives an independent copy, and Claude
+rules are copied into `.claude/rules`. Legacy rule junctions are removed without
+deleting their targets. Existing Claude and Gemini settings remain team-owned.
+New Gemini settings name `AGENTS.md` and `GEMINI.md` as context files.
+
+Each sync writes `.agent-governance.lock` with the hub commit, template dirty
+state, and line-ending-normalized SHA-256 digests. Digests occupy separate JSON
+lines to avoid treating filenames containing "secrets" as credential assignments.
+Git failures stop automatic commit processing and leave changes available for
+review. Sync does not install missing dependencies.
+
+Run `pwsh -NoProfile -File scripts/guardrails/verify-governance.ps1` to detect
+changes since sync. Without a lock this local diagnostic reports a notice;
+it does not establish authenticity. For a trusted comparison, run the verifier
+from a separately trusted hub checkout, with the downstream repository as the
+working directory and `-HubTemplate <trusted-checkout>/template`. This mode
+requires a lock, checks required canonical entries independently of the lock,
+and compares managed content with the supplied template. Select the trusted
+checkout version yourself; the verifier does not fetch or authenticate the
+commit recorded in the lock. Markdown comparisons tolerate whitespace changes.
+
+The reusable CI workflow currently enforces secrets and branch policy. Integrity
+verification must be invoked separately from a trusted checkout; neither a
+repository-local lock nor its local verifier is a tamper-proof security boundary.
 
 ### 4. Lockfile-Aware Polyglot Detection
 

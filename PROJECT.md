@@ -9,7 +9,7 @@ This repository maintains the canonical multi-agent governance standards, determ
 - **Repository Name:** agent-governance
 - **Detected Stack:** PowerShell Distribution Engine + Shell Hook Wrappers + Markdown Domain Specs
 - **Primary Tools:** Lefthook (v2.1.14), Gitleaks (v8.30.1), PowerShell 7+
-- **Target Platforms:** Windows (NTFS Hardlinks & Junctions), Linux, macOS (Git Bash / POSIX sh)
+- **Target Platforms:** Windows, Linux, macOS (plain-file distribution; legacy NTFS link migration on Windows)
 
 ---
 
@@ -19,7 +19,9 @@ This repository maintains the canonical multi-agent governance standards, determ
 - **Run CLI Help:** `Sync-AgentGovernance -h`
 - **Test All Downstream Repos (Dry-Run):** `Sync-AgentGovernance audit -a`
 - **Validate Guardrail Scripts:** `Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1`
-- **Run Test Suite:** `Invoke-Pester ./tests` (Pester 6.2.0; engine tests are Windows-only until junctions are replaced)
+- **Run Test Suite:** `Invoke-Pester ./tests` (Pester 6.2.0; legacy links use junctions on Windows and symlinks on Unix)
+- **Preview Distribution:** `Sync-AgentGovernance -RepoPath <path> -WhatIf`
+- **Verify Distributed Integrity:** `pwsh -NoProfile -File scripts/guardrails/verify-governance.ps1` (see README for trusted-template verification)
 
 ---
 
@@ -35,5 +37,6 @@ This repository maintains the canonical multi-agent governance standards, determ
 - `Set-GovernanceRuleset.ps1` + `rulesets/`: Server-side default-branch ruleset (non-bypassable layer). Dry-run first: `./Set-GovernanceRuleset.ps1 -Repository owner/name -WhatIf`.
 - `.github/workflows/governance-gate.yml`: Reusable CI gate (full-history Gitleaks, PR branch policy) for downstream repositories to call by commit SHA.
 - `tests/`: Pester suite for the engine, guardrails, and enforcement layers.
+- `docs/adr/`: Architecture decision records (e.g. `0001-distribution-model.md`: why the sync engine is kept over Copier).
 - `WORKING.md`: Ephemeral session continuity ledger (local working memory, shielded from git).
 - `.agents/state/`: Branch-grounded state archive for multi-branch session persistence.

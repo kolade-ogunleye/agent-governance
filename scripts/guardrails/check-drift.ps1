@@ -26,7 +26,8 @@ try {
         "scripts/guardrails/detect-secrets.ps1",
         "scripts/guardrails/guard-tests.ps1",
         "scripts/guardrails/audit-dependencies.ps1",
-        "scripts/guardrails/run-tests.ps1"
+        "scripts/guardrails/run-tests.ps1",
+        "scripts/guardrails/verify-governance.ps1"
     )
 
     $hasDrift = $false

@@ -14,9 +14,8 @@ BeforeAll {
     }
 }
 
-# The engine creates NTFS junctions for .claude/rules and .gemini/rules, which are Windows-only
-# until plan Phase 5 replaces them. Guardrail tests cover the cross-platform surface meanwhile.
-Describe 'Sync-AgentGovernance' -Skip:(-not $IsWindows) {
+# Exercise legacy junctions on Windows and equivalent directory symlinks on Unix.
+Describe 'Sync-AgentGovernance' {
     BeforeEach {
         $script:Repo = New-TestRepo -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
     }
@@ -99,6 +98,133 @@ Describe 'Sync-AgentGovernance' -Skip:(-not $IsWindows) {
         git -C $Repo branch --show-current | Should -Be 'chore/agent-governance'
         git -C $Repo rev-parse main | Should -Be $mainHead
         git -C $Repo log -1 --format=%s | Should -Be 'chore(governance): install unified agent contract and deterministic guardrails'
+    }
+
+    Context 'plan Phase 5 distribution' {
+        It 'writes CLAUDE.md as an @AGENTS.md import instead of a hard link' {
+            Invoke-QuietSync -RepoPath $Repo
+
+            (Get-Content (Join-Path $Repo 'CLAUDE.md') -Raw).Trim() | Should -BeExactly '@AGENTS.md'
+        }
+
+        It 're-syncs before the first commit, when the engine-created .gitignore is still untracked' {
+            Invoke-QuietSync -RepoPath $Repo
+            Remove-Item -LiteralPath (Join-Path $Repo 'lefthook.yml')
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            Join-Path $Repo 'lefthook.yml' | Should -Exist
+        }
+
+        It 'migrates legacy hard links without writing through them into AGENTS.md' {
+            Invoke-QuietSync -RepoPath $Repo
+            foreach ($linked in @('CLAUDE.md', '.github/copilot-instructions.md')) {
+                Remove-Item -LiteralPath (Join-Path $Repo $linked)
+                New-Item -ItemType HardLink -Path (Join-Path $Repo $linked) -Target (Join-Path $Repo 'AGENTS.md') | Out-Null
+            }
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            (Get-Content (Join-Path $Repo 'AGENTS.md') -Raw) | Should -BeExactly (Get-Content (Join-Path $HubDir 'AGENTS.md') -Raw)
+            (Get-Content (Join-Path $Repo 'CLAUDE.md') -Raw).Trim() | Should -BeExactly '@AGENTS.md'
+            (Get-Content (Join-Path $Repo '.github/copilot-instructions.md') -Raw) | Should -BeExactly (Get-Content (Join-Path $HubDir 'AGENTS.md') -Raw)
+        }
+
+        It 'writes .github/copilot-instructions.md as an independent copy of the contract' {
+            Invoke-QuietSync -RepoPath $Repo
+            $copilot = Join-Path $Repo '.github/copilot-instructions.md'
+            $before = Get-Content $copilot -Raw
+            $before | Should -BeExactly (Get-Content (Join-Path $Repo 'AGENTS.md') -Raw)
+
+            [System.IO.File]::AppendAllText((Join-Path $Repo 'AGENTS.md'), "extra`n")
+
+            Get-Content $copilot -Raw | Should -BeExactly $before
+        }
+
+        It 'installs Claude rules as real files, replacing a legacy junction without touching canonical rules' {
+            Invoke-QuietSync -RepoPath $Repo
+            $claudeRules = Join-Path $Repo '.claude/rules'
+            [System.IO.Directory]::Delete($claudeRules, $true)
+            $linkKind = if ($IsWindows) { 'Junction' } else { 'SymbolicLink' }
+            New-Item -ItemType $linkKind -Path $claudeRules -Target (Join-Path $Repo '.agents/rules') | Out-Null
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            (Get-Item $claudeRules -Force).LinkType | Should -BeNullOrEmpty
+            Join-Path $claudeRules 'languages.md' | Should -Exist
+            Join-Path $Repo '.agents/rules/languages.md' | Should -Exist
+        }
+
+        It 'removes a legacy .gemini/rules junction and points Gemini CLI at AGENTS.md' {
+            New-Item -ItemType Directory -Path (Join-Path $Repo '.agents/rules') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $Repo '.gemini') -Force | Out-Null
+            $linkKind = if ($IsWindows) { 'Junction' } else { 'SymbolicLink' }
+            New-Item -ItemType $linkKind -Path (Join-Path $Repo '.gemini/rules') -Target (Join-Path $Repo '.agents/rules') | Out-Null
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            Join-Path $Repo '.gemini/rules' | Should -Not -Exist
+            Join-Path $Repo '.agents/rules/languages.md' | Should -Exist
+            $gemini = Get-Content (Join-Path $Repo '.gemini/settings.json') -Raw | ConvertFrom-Json
+            $gemini.context.fileName | Should -Contain 'AGENTS.md'
+        }
+
+        It 'never overwrites an existing .gemini/settings.json' {
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.gemini/settings.json' = '{ "theme": "custom" }' }
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            Get-Content (Join-Path $Repo '.gemini/settings.json') -Raw | Should -BeExactly '{ "theme": "custom" }'
+        }
+
+        It 'does not create undocumented .claudeignore or .codexignore files' {
+            Invoke-QuietSync -RepoPath $Repo
+
+            Join-Path $Repo '.claudeignore' | Should -Not -Exist
+            Join-Path $Repo '.codexignore' | Should -Not -Exist
+        }
+
+        It 'records a SHA-256 lock entry for every managed file' {
+            Invoke-QuietSync -RepoPath $Repo
+
+            $lock = Get-Content (Join-Path $Repo '.agent-governance.lock') -Raw | ConvertFrom-Json
+            foreach ($rel in @('AGENTS.md', 'CLAUDE.md', 'lefthook.yml', 'scripts/guardrails/protect-main.ps1', '.agents/rules/languages.md')) {
+                $lock.files.$rel | Should -BeExactly (Get-FileHash -Algorithm SHA256 (Join-Path $Repo $rel)).Hash.ToLowerInvariant()
+            }
+            $lock.hub.commit | Should -Match '^[0-9a-f]{40}$'
+        }
+
+        It 'archives team edits to the managed contract that the lock did not record' {
+            Invoke-QuietSync -RepoPath $Repo
+            git -C $Repo add -A
+            git -C $Repo -c core.hooksPath=.git/no-hooks commit --quiet -m 'chore: first sync'
+            [System.IO.File]::AppendAllText((Join-Path $Repo 'AGENTS.md'), "`n## 9. TEAM RULE`nNever deploy on Fridays.`n")
+            git -C $Repo -c core.hooksPath=.git/no-hooks commit --quiet -am 'docs: team rule'
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            (Get-Content (Join-Path $Repo 'docs/LEGACY-AGENT-NOTES.md') -Raw) | Should -Match 'Never deploy on Fridays\.'
+            (Get-Content (Join-Path $Repo 'AGENTS.md') -Raw) | Should -BeExactly (Get-Content (Join-Path $HubDir 'AGENTS.md') -Raw)
+        }
+
+        It 'with -WhatIf, writes nothing and lists the planned changes' {
+            $messages = Sync-AgentGovernance -RepoPath $Repo -WhatIf 6>&1 3>$null | ForEach-Object { "$_" }
+
+            Join-Path $Repo 'AGENTS.md' | Should -Not -Exist
+            git -C $Repo status --porcelain | Should -BeNullOrEmpty
+            ($messages -join "`n") | Should -Match 'create\s+AGENTS\.md'
+        }
+
+        It 'with -All, syncs every repository under -FleetRoot' {
+            $fleet = Join-Path $TestDrive ("fleet-" + [guid]::NewGuid().ToString('N'))
+            $a = New-TestRepo -Path (Join-Path $fleet 'alpha')
+            $b = New-TestRepo -Path (Join-Path $fleet 'beta')
+
+            Sync-AgentGovernance -All -FleetRoot $fleet 6>$null 3>$null
+
+            Join-Path $a 'AGENTS.md' | Should -Exist
+            Join-Path $b 'AGENTS.md' | Should -Exist
+        }
     }
 
     Context 'plan Phase 4 agent-native enforcement' {

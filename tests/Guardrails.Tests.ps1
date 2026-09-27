@@ -334,6 +334,81 @@ Describe 'run-tests.ps1' {
     }
 }
 
+Describe 'verify-governance.ps1' {
+    BeforeEach {
+        $script:Repo = New-TestRepo -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
+        $script:Guard = (Resolve-Path (Join-Path $GuardDir 'verify-governance.ps1')).Path
+        $script:Hub = Join-Path $TestDrive ("hub-" + [guid]::NewGuid().ToString('N'))
+        foreach ($root in @($Repo, $Hub)) {
+            New-Item -ItemType Directory -Path (Join-Path $root 'scripts/guardrails') -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $root 'scripts/guardrails/protect-main.ps1'), "exit 0`n")
+            [System.IO.File]::WriteAllText((Join-Path $root 'AGENTS.md'), "# Contract`n`nRule one.`n")
+        }
+        $files = [ordered]@{}
+        foreach ($rel in @('AGENTS.md', 'scripts/guardrails/protect-main.ps1')) {
+            $files[$rel] = (Get-FileHash -Algorithm SHA256 (Join-Path $Repo $rel)).Hash.ToLowerInvariant()
+        }
+        $lock = [ordered]@{ version = 1; hub = [ordered]@{ commit = ('a' * 40) }; files = $files }
+        [System.IO.File]::WriteAllText((Join-Path $Repo '.agent-governance.lock'), ($lock | ConvertTo-Json -Depth 5))
+    }
+
+    It 'passes when every managed file matches the lock' {
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+
+    It 'fails and names a managed file that no longer matches the lock' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'scripts/guardrails/protect-main.ps1'), "# weakened`nexit 0`n")
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'scripts/guardrails/protect-main\.ps1'
+    }
+
+    It 'fails when a managed file is missing' {
+        Remove-Item -LiteralPath (Join-Path $Repo 'AGENTS.md')
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 1
+    }
+
+    It 'with -HubTemplate, catches a tampered script even when the lock was rewritten to match' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'scripts/guardrails/protect-main.ps1'), "# weakened`nexit 0`n")
+        $lockPath = Join-Path $Repo '.agent-governance.lock'
+        $lock = Get-Content $lockPath -Raw | ConvertFrom-Json
+        $lock.files.'scripts/guardrails/protect-main.ps1' = (Get-FileHash -Algorithm SHA256 (Join-Path $Repo 'scripts/guardrails/protect-main.ps1')).Hash.ToLowerInvariant()
+        [System.IO.File]::WriteAllText($lockPath, ($lock | ConvertTo-Json -Depth 5))
+
+        Push-Location $Repo
+        try {
+            $output = & pwsh -NoProfile -File $Guard -HubTemplate $Hub 2>&1
+            $LASTEXITCODE | Should -Be 1
+            ($output -join "`n") | Should -Match 'differs from the hub'
+        } finally {
+            Pop-Location
+        }
+    }
+
+    It 'with -HubTemplate, tolerates whitespace-only markdown reformatting' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo 'AGENTS.md'), "# Contract`n`n`nRule   one.`n")
+        $lockPath = Join-Path $Repo '.agent-governance.lock'
+        $lock = Get-Content $lockPath -Raw | ConvertFrom-Json
+        $lock.files.'AGENTS.md' = (Get-FileHash -Algorithm SHA256 (Join-Path $Repo 'AGENTS.md')).Hash.ToLowerInvariant()
+        [System.IO.File]::WriteAllText($lockPath, ($lock | ConvertTo-Json -Depth 5))
+
+        Push-Location $Repo
+        try {
+            & pwsh -NoProfile -File $Guard -HubTemplate $Hub 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 0
+        } finally {
+            Pop-Location
+        }
+    }
+
+    It 'passes with a notice when the repository has no lock yet' {
+        Remove-Item -LiteralPath (Join-Path $Repo '.agent-governance.lock')
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'No \.agent-governance\.lock'
+    }
+}
+
 Describe 'check-drift.ps1' {
     BeforeEach {
         $script:Repo = New-TestRepo -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
