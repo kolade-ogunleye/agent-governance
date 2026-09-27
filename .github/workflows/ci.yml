@@ -16,7 +16,7 @@ env:
   GITLEAKS_LINUX_X64_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   PRETTIER_VERSION: "3.9.9"
   # Warnings still present in the engine; each later plan phase lowers this ratchet toward 0.
-  PSSA_WARNING_BASELINE: "9"
+  PSSA_WARNING_BASELINE: "1"
 
 jobs:
   verify:

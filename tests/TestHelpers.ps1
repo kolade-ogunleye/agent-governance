@@ -40,6 +40,31 @@ function Add-FixtureCommit {
     git -C $RepoPath -c core.hooksPath=.git/no-hooks commit --quiet -m 'chore: add fixture files'
 }
 
+function New-CommandShim {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Creates disposable fixtures inside Pester TestDrive only.')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Directory,
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [int]$ExitCode = 0,
+        [string]$MarkerPath
+    )
+
+    # A stand-in executable that optionally records its invocation, so tests need no real toolchain.
+    New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+    if ($IsWindows) {
+        $body = if ($MarkerPath) { "New-Item -ItemType File -Path '$MarkerPath' -Force | Out-Null`n" } else { '' }
+        [System.IO.File]::WriteAllText((Join-Path $Directory "$Name.ps1"), $body + "exit $ExitCode`n")
+    } else {
+        $body = if ($MarkerPath) { "touch '$MarkerPath'`n" } else { '' }
+        $shim = Join-Path $Directory $Name
+        [System.IO.File]::WriteAllText($shim, "#!/bin/sh`n" + $body + "exit $ExitCode`n")
+        chmod +x $shim
+    }
+}
+
 function Invoke-Guardrail {
     [CmdletBinding()]
     param(

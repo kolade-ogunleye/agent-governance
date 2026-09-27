@@ -14,7 +14,7 @@
      - Test-only additions / fixes: `git checkout -b test/<task-slug>`
 2. **Synchronized Conventional Commits:** All commit messages MUST strictly reflect the task type using Conventional Commits 1.0.0 format: `<type>(<optional-scope>): <description>`.
 3. **Tree Cleanliness:** You MUST run `git status --porcelain`. If output is non-empty from uncommitted work, you MUST HALT and request user instruction to stash or commit.
-4. **Guardrail Check:** Ensure `lefthook` hooks are active. If missing, run `lefthook install`.
+4. **Guardrail Check:** Ensure the git `pre-commit` hook contains the `# >>> agent-governance` block. If missing, run `Sync-AgentGovernance`. You MUST NOT run `lefthook install`, which replaces the fail-closed governance gate.
 
 ## 2. ADVERSARIAL RED-TEAM INVERSION (BEFORE ANY CODE EDIT)
 

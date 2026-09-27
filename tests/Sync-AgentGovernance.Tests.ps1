@@ -101,8 +101,8 @@ Describe 'Sync-AgentGovernance' -Skip:(-not $IsWindows) {
         git -C $Repo log -1 --format=%s | Should -Be 'chore(governance): install unified agent contract and deterministic guardrails'
     }
 
-    Context 'known defects (enabled as each plan phase lands)' {
-        It 'adds *.key to an existing .gitignore that already lists *.keystore (plan defect 4)' -Skip {
+    Context 'plan Phase 2 regressions' {
+        It 'adds *.key to an existing .gitignore that already lists *.keystore (plan defect 4)' {
             Add-FixtureCommit -RepoPath $Repo -Files @{ '.gitignore' = "*.keystore`n" }
 
             Invoke-QuietSync -RepoPath $Repo
@@ -110,7 +110,15 @@ Describe 'Sync-AgentGovernance' -Skip:(-not $IsWindows) {
             (Get-Content (Join-Path $Repo '.gitignore')) | Should -Contain '*.key'
         }
 
-        It 'recognises Claude Code (CLAUDECODE) in the agent hook gate (plan defect 1)' -Skip {
+        It 'adds a missing .gitattributes rule even when a longer rule contains it as a substring (plan defect 4)' {
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.gitattributes' = "*.md text eol=lf diff=markdown`n" }
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            (Get-Content (Join-Path $Repo '.gitattributes')) | Should -Contain '*.md text eol=lf'
+        }
+
+        It 'recognises Claude Code (CLAUDECODE) in the agent hook gate (plan defect 1)' {
             Add-FixtureCommit -RepoPath $Repo -Files @{ '.githooks/pre-commit' = "#!/bin/sh`nexit 0`n" }
             git -C $Repo config --local core.hooksPath .githooks
 
@@ -119,7 +127,7 @@ Describe 'Sync-AgentGovernance' -Skip:(-not $IsWindows) {
             (Get-Content (Join-Path $Repo '.githooks/pre-commit') -Raw) | Should -Match '\$CLAUDECODE'
         }
 
-        It 'preserves a custom .github/copilot-instructions.md (plan defect 7)' -Skip {
+        It 'preserves a custom .github/copilot-instructions.md (plan defect 7)' {
             Add-FixtureCommit -RepoPath $Repo -Files @{ '.github/copilot-instructions.md' = "# Copilot: prefer Result types`n" }
 
             Invoke-QuietSync -RepoPath $Repo
@@ -127,6 +135,99 @@ Describe 'Sync-AgentGovernance' -Skip:(-not $IsWindows) {
             $legacy = Join-Path $Repo 'docs/LEGACY-AGENT-NOTES.md'
             $legacy | Should -Exist
             (Get-Content $legacy -Raw) | Should -Match 'prefer Result types'
+        }
+
+        It 'preserves custom AGENTS.md and CLAUDE.md content together, once each (plan defect 7)' {
+            Add-FixtureCommit -RepoPath $Repo -Files @{
+                'AGENTS.md' = "# Team rules`nUse tabs.`n"
+                'CLAUDE.md' = "# Claude notes`nRun make check.`n"
+            }
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            $legacy = Get-Content (Join-Path $Repo 'docs/LEGACY-AGENT-NOTES.md') -Raw
+            $legacy | Should -Match 'Use tabs\.'
+            $legacy | Should -Match 'Run make check\.'
+            ([regex]::Matches($legacy, 'Use tabs\.')).Count | Should -Be 1
+        }
+
+        It 'appends newly found custom instructions to an existing legacy archive (plan defect 7)' {
+            Add-FixtureCommit -RepoPath $Repo -Files @{
+                'docs/LEGACY-AGENT-NOTES.md'      = "# Legacy`nOld note.`n"
+                '.github/copilot-instructions.md' = "# Copilot: prefer Result types`n"
+            }
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            $legacy = Get-Content (Join-Path $Repo 'docs/LEGACY-AGENT-NOTES.md') -Raw
+            $legacy | Should -Match 'Old note\.'
+            $legacy | Should -Match 'prefer Result types'
+        }
+
+        It 'does not archive an earlier hub version of the governance contract (plan defect 7)' {
+            $olderContract = (Get-Content (Join-Path $HubDir 'AGENTS.md') -Raw) + "`n## 9. RETIRED SECTION`n"
+            Add-FixtureCommit -RepoPath $Repo -Files @{ 'AGENTS.md' = $olderContract }
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            Join-Path $Repo 'docs/LEGACY-AGENT-NOTES.md' | Should -Not -Exist
+        }
+
+        It 'installs a fail-closed gate in the default hooks path that survives a commit (plan defect 2)' {
+            Invoke-QuietSync -RepoPath $Repo -BranchAndCommit
+
+            $hook = Get-Content (Join-Path $Repo '.git/hooks/pre-commit') -Raw
+            $hook | Should -Match '# >>> agent-governance'
+            $hook | Should -Match 'lefthook run pre-commit --no-auto-install'
+            $hook | Should -Match '\$CLAUDECODE'
+        }
+
+        It 'replaces a Lefthook-generated hook instead of appending to it (plan defect 2)' {
+            $hooksDir = Join-Path $Repo '.git/hooks'
+            [System.IO.File]::WriteAllText((Join-Path $hooksDir 'pre-commit'), "#!/bin/sh`ncall_lefthook()`n{`n  lefthook `"`$@`"`n}`n`ncall_lefthook run `"pre-commit`" `"`$@`"`n")
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            $hook = Get-Content (Join-Path $hooksDir 'pre-commit') -Raw
+            $hook | Should -Not -Match 'call_lefthook'
+            $hook | Should -Match '# >>> agent-governance'
+        }
+
+        It 'keeps user hook lines that follow a legacy governance block and leaves exactly one block (plan defect 7)' {
+            $legacyBlock = @(
+                '# Chained by Agent Governance (Lefthook + Gitleaks)'
+                'if command -v lefthook >/dev/null 2>&1; then'
+                '  lefthook run pre-commit || exit 1'
+                'else'
+                '  echo "missing" >&2'
+                '  if [ -n "$AGENT_ROLE" ]; then'
+                '    exit 1'
+                '  fi'
+                'fi'
+            ) -join "`n"
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.githooks/pre-commit' = "#!/bin/sh`necho before-block`n$legacyBlock`necho after-block`nexit 0`n" }
+            git -C $Repo config --local core.hooksPath .githooks
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            $hook = Get-Content (Join-Path $Repo '.githooks/pre-commit') -Raw
+            $hook | Should -Match 'echo before-block'
+            $hook | Should -Match 'echo after-block'
+            $hook | Should -Not -Match '# Chained by Agent Governance'
+            ([regex]::Matches($hook, '# >>> agent-governance')).Count | Should -Be 1
+        }
+
+        It 'produces an identical hook when re-synced (plan defect 7)' {
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.githooks/pre-commit' = "#!/bin/sh`necho existing-check`nexit 0`n" }
+            git -C $Repo config --local core.hooksPath .githooks
+            Invoke-QuietSync -RepoPath $Repo
+            $first = Get-Content (Join-Path $Repo '.githooks/pre-commit') -Raw
+            $firstDefault = Get-Content (Join-Path $Repo '.githooks/pre-push') -Raw
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            Get-Content (Join-Path $Repo '.githooks/pre-commit') -Raw | Should -BeExactly $first
+            Get-Content (Join-Path $Repo '.githooks/pre-push') -Raw | Should -BeExactly $firstDefault
         }
     }
 }
