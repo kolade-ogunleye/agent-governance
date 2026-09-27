@@ -100,6 +100,17 @@ Describe 'Sync-AgentGovernance' {
         git -C $Repo log -1 --format=%s | Should -Be 'chore(governance): install unified agent contract and deterministic guardrails'
     }
 
+    Context 'plan Phase 6 progressive disclosure' {
+        It 'deploys every path-scoped language rule to .agents/rules and .claude/rules' {
+            Invoke-QuietSync -RepoPath $Repo
+
+            foreach ($rule in (Get-ChildItem (Join-Path $HubDir '.agents/rules') -Filter 'lang-*.md')) {
+                Join-Path $Repo ".agents/rules/$($rule.Name)" | Should -Exist
+                (Get-Content (Join-Path $Repo ".claude/rules/$($rule.Name)") -Raw) | Should -BeExactly (Get-Content $rule.FullName -Raw)
+            }
+        }
+    }
+
     Context 'plan Phase 5 distribution' {
         It 'writes CLAUDE.md as an @AGENTS.md import instead of a hard link' {
             Invoke-QuietSync -RepoPath $Repo

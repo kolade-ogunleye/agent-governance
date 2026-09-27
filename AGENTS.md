@@ -13,12 +13,12 @@
      - Maintenance / tooling / dependencies: `git checkout -b chore/<task-slug>`
      - Test-only additions / fixes: `git checkout -b test/<task-slug>`
 2. **Synchronized Conventional Commits:** All commit messages MUST strictly reflect the task type using Conventional Commits 1.0.0 format: `<type>(<optional-scope>): <description>`.
-3. **Tree Cleanliness:** You MUST run `git status --porcelain`. If output is non-empty from uncommitted work, you MUST HALT and request user instruction to stash or commit.
+3. **Tree Cleanliness:** At task start you MUST run `git status --porcelain`. If it shows uncommitted changes you did not make, you MUST HALT and ask the user whether to stash or commit them.
 4. **Guardrail Check:** Ensure the git `pre-commit` hook contains the `# >>> agent-governance` block. If missing, run `Sync-AgentGovernance`. You MUST NOT run `lefthook install`, which replaces the fail-closed governance gate.
 
 ## 2. ADVERSARIAL RED-TEAM INVERSION (BEFORE ANY CODE EDIT)
 
-Before modifying any files or presenting your plan, you MUST adopt a **Devil's Advocate Auditor** persona and document:
+Before any change beyond a typo or documentation-only fix, and before presenting your plan, you MUST adopt a **Devil's Advocate Auditor** persona and document:
 
 - **Failure Mode 1:** One concrete boundary condition or edge case (nulls, empty states, race conditions) that could break this implementation.
 - **Failure Mode 2:** One scenario where callers, integrations, or downstream consumers could silently break.
@@ -34,18 +34,19 @@ Before modifying any files or presenting your plan, you MUST adopt a **Devil's A
 
 Before generating, modifying, or refactoring code in any language, you MUST load the relevant domain rules and cite their specific requirements in your plan:
 
-- **Language Standards:** Read and cite `.agents/rules/languages.md` (strict type safety, zero `any`, `dataclasses`/`pydantic`, 100% parameterized SQL, async non-blocking I/O).
+- **Language Standards:** Read `.agents/rules/languages.md`, then cite the `lang-*.md` file for each language you touch (strict type safety, zero `any`, `dataclasses`/`pydantic`, 100% parameterized SQL, async non-blocking I/O).
 - **Security & Performance:** Read and cite `.agents/rules/security-performance.md` (untrusted data-plane quarantine, latest stable/LTS packages only, anti-hallucination grounding, memory streaming, $O(n)$ algorithmic baseline).
 
 ## 5. DEPENDENCY & TEST INTEGRITY (ANTI-TAMPERING)
 
 1. **Test Anti-Tampering:** You MUST NOT delete existing test files, comment out assertions, or alter expected values in existing baseline tests to force a pass. Bug fixes and features MUST be validated by adding _new_ assertions and test cases.
 2. **Dependency Gate:** You MUST NOT install global binaries (`npm -g`, `pip install --user`). You may propose project dev-dependencies (`pnpm add -D`, `uv add --dev`), but you MUST update lockfiles and obtain explicit user approval before network installation.
+3. **Guardrail Integrity:** You MUST NOT bypass or disable hooks (`--no-verify`, `LEFTHOOK=0`, `core.hooksPath` overrides) or edit hub-managed files (`scripts/guardrails/`, `.agents/rules/`, `lefthook.yml`, `.agent-governance.lock`). Fix the underlying failure, or ask the user.
 
 ## 6. SECURITY & CONTEXT BOUNDARIES
 
 1. **Scope Limit:** All operations MUST remain strictly within this repository root. NEVER inspect or access `~/.ssh`, `~/.aws`, `~/.gnupg`, or parent directories.
-2. **Secret Shield:** NEVER read, edit, print, or commit `.env*`, private keys (`.pem`, `.key`, `.id_*`), certificates, or tokens.
+2. **Secret Shield:** NEVER read, edit, print, or commit `.env*`, private keys (`.pem`, `.key`, `.id_*`), certificates, or tokens. Enforced by `.claude/settings.json` deny rules and the `detect-secrets` pre-commit hook.
 
 ## 7. DEFINITION OF DONE (MANDATORY GATE)
 

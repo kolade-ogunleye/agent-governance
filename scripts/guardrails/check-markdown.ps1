@@ -10,8 +10,12 @@ if (-not $repoRoot) { exit 0 }
 $stagedFiles = (git -C $repoRoot diff --cached --name-only --diff-filter=ACM 2>$null) -split "`r?`n" | Where-Object { $_ -match '\.md$' -or $_ -match '\.template$' }
 
 if (-not $stagedFiles -or $stagedFiles.Count -eq 0 -or ($stagedFiles.Count -eq 1 -and [string]::IsNullOrWhiteSpace($stagedFiles[0]))) {
-    # If no staged markdown, check all tracked markdown files in small repos, or skip
-    $mdFiles = Get-ChildItem -Path $repoRoot -Filter "*.md" -Recurse -File | Where-Object { $_.FullName -notmatch '[\\/](\.git|node_modules|vendor)[\\/]' }
+    # No staged markdown: check every markdown file git would commit (tracked, or untracked but not ignored).
+    # Ignored files such as local session ledgers are never committed, so they are out of scope.
+    $mdFiles = @(git -C $repoRoot ls-files --cached --others --exclude-standard -- '*.md' 2>$null) | ForEach-Object {
+        $p = Join-Path $repoRoot $_
+        if (Test-Path -LiteralPath $p -PathType Leaf) { Get-Item -LiteralPath $p }
+    }
 } else {
     $mdFiles = $stagedFiles | ForEach-Object {
         $p = Join-Path $repoRoot $_

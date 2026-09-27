@@ -14,21 +14,14 @@ try {
     $repoRoot = "$(git rev-parse --show-toplevel 2>$null)".Trim()
     if (-not $repoRoot) { exit 0 }
 
-    $criticalFiles = @(
-        "AGENTS.md",
-        "lefthook.yml",
-        ".agents/rules/languages.md",
-        ".agents/rules/security-performance.md",
-        "scripts/guardrails/agent-bash-guard.ps1",
-        "scripts/guardrails/check-drift.ps1",
-        "scripts/guardrails/check-markdown.ps1",
-        "scripts/guardrails/protect-main.ps1",
-        "scripts/guardrails/detect-secrets.ps1",
-        "scripts/guardrails/guard-tests.ps1",
-        "scripts/guardrails/audit-dependencies.ps1",
-        "scripts/guardrails/run-tests.ps1",
-        "scripts/guardrails/verify-governance.ps1"
-    )
+    # Derived from the hub itself so rules and guardrails added later are covered without editing this list.
+    $criticalFiles = @("AGENTS.md", "lefthook.yml")
+    foreach ($managedDir in @(".agents/rules", "scripts/guardrails")) {
+        $hubManagedDir = Join-Path $hubDir $managedDir
+        if (Test-Path -LiteralPath $hubManagedDir -PathType Container) {
+            $criticalFiles += Get-ChildItem -LiteralPath $hubManagedDir -File | ForEach-Object { "$managedDir/$($_.Name)" }
+        }
+    }
 
     $hasDrift = $false
 

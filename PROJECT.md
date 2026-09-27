@@ -29,7 +29,7 @@ This repository maintains the canonical multi-agent governance standards, determ
 
 - `template/`: The source-of-truth governance assets deployed to downstream repositories.
   - `template/AGENTS.md`: Canonical lean operating contract (<80 lines).
-  - `template/.agents/rules/`: Progressive Disclosure domain rules (`languages.md`, `security-performance.md`).
+  - `template/.agents/rules/`: Always-loaded `languages.md` index and `security-performance.md`, plus path-scoped `lang-*.md` rules.
   - `template/scripts/guardrails/`: Deterministic security scripts executed by Lefthook.
   - `template/lefthook.yml`: Deterministic hook configuration.
   - `template/.claude/settings.json`: Claude Code secret deny rules + PreToolUse Bash guard (deployed only when a repo has none).

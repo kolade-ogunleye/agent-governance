@@ -1,8 +1,8 @@
 # 🛡️ Agent Governance
 
-> **Enterprise-Grade Multi-Agent Governance, Deterministic Guardrails, and Context Architecture for Autonomous AI Coding Agents.**
+> **Multi-agent governance for AI coding agents: one shared contract, layered guardrails, and hub-to-repo distribution.**
 
-`agent-governance` establishes a synchronized hub-and-spoke governance engine across software repositories. It enforces RFC 2119 operational contracts, deterministic pre-commit/pre-push guardrails (via Lefthook and Gitleaks), Progressive Disclosure domain constraints, and automated hub-to-repo drift detection—without token bloat or attention degradation.
+`agent-governance` distributes one RFC 2119 operating contract, path-scoped language rules, and guardrails from a central hub to every repository. Guardrails are layered by how hard they are to bypass: server-side rulesets and CI cannot be skipped, Claude Code deny rules and hooks constrain the agent itself, and local Lefthook hooks give fast feedback. Instructions guide agents; only the enforcement layers below actually block anything.
 
 ---
 
@@ -22,11 +22,17 @@ flowchart TD
         T_ENGINE["Sync-AgentGovernance.ps1 (Reconciliation Engine)"]
     end
 
-    subgraph Guardrails["Deterministic Execution Plane"]
+    subgraph Enforcement["Enforcement Layers (hardest to bypass first)"]
+        E_RULESET["GitHub ruleset (PR required, no force-push)"]
+        E_CI["governance-gate.yml (Gitleaks history scan, branch policy)"]
+        E_AGENT[".claude/settings.json (secret deny rules, Bash guard hook)"]
+    end
+
+    subgraph Guardrails["Local Hooks (fast feedback; skippable with --no-verify)"]
         G_MAIN["protect-main (Branch semantic state machine)"]
         G_SECRETS["detect-secrets (Gitleaks real-time scanning)"]
         G_TESTS["guard-tests (Anti-tampering test protector)"]
-        G_DRIFT["check-drift (Hub vs Repo SHA256 sync check)"]
+        G_DRIFT["check-drift (advisory hub vs repo content check)"]
         G_SUPPLY["audit-dependencies (Lockfile-aware CVE audit)"]
         G_RUNNER["run-tests (Lockfile-aware test runner)"]
     end
@@ -64,11 +70,22 @@ Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
 
 ---
 
+## 🔒 Enforcement Layers
+
+Ordered from hardest to easiest to bypass:
+
+1. **Default-branch ruleset (cannot be bypassed from a clone; only repository admins can change it):** applied to GitHub with `./Set-GovernanceRuleset.ps1 -Repository owner/name` (dry-run with `-WhatIf`). Requires pull requests and blocks force-pushes and deletion.
+2. **Governance gate (cannot be bypassed from a clone once the ruleset requires it):** the reusable workflow `.github/workflows/governance-gate.yml`, called by commit SHA, scans full history with Gitleaks and enforces branch naming on pull requests.
+3. **Agent permissions:** `.claude/settings.json` denies `Read`/`Edit` of secret files and runs a PreToolUse guard that blocks `--no-verify`, `LEFTHOOK=0`, `lefthook install`, `core.hooksPath` overrides, and pushes to `main`. Wrapper scripts and subprocesses can still evade it, so layers 1 and 2 remain the backstop.
+4. **Local hooks:** Lefthook pre-commit and pre-push, fail-closed for detected agent sessions. Skippable with `--no-verify`; the layers above catch what they miss.
+5. **Contract and rules:** `AGENTS.md` and `.agents/rules/` guide agents but do not block anything.
+
 ## ⚡ Core Capabilities
 
 ### 1. The Lean Universal Contract & Dual-Contract Layering
 
-- Root [`AGENTS.md`](template/AGENTS.md) is kept ultra-lean (<80 lines) to prevent context diffusion and token exhaustion.
+- Root [`AGENTS.md`](template/AGENTS.md) stays under 80 lines (enforced by a test). Claude reads it through a one-line `CLAUDE.md` import.
+- Language rules live in `lang-*.md` files with `paths:` frontmatter, so Claude Code loads each one only when it reads a matching file. `security-performance.md` and the short `languages.md` index always load.
 - **Precedence:** Universal operating rules (branch semantics, conventional commits, secret shielding, test anti-tampering) hold absolute veto power.
 - **Domain Memory:** Pre-existing custom agent instructions in existing repositories are automatically archived into `docs/LEGACY-AGENT-NOTES.md` and cited as mandatory domain logic in `PROJECT.md`.
 
@@ -80,7 +97,7 @@ Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
 
 ### 3. Automated Hub Drift Detection
 
-- Pre-commit checks SHA256 hashes of local rules against the Central Hub.
+- Pre-commit compares managed files with the hub template (whitespace-normalized for Markdown). It is advisory and never blocks a commit.
 - If updates are committed to `agent-governance`, downstream repositories immediately notify developers:
   ```
   ⚡ [Agent Governance] Local repository rules have drifted from the Central Hub.
@@ -129,7 +146,7 @@ repository-local lock nor its local verifier is a tamper-proof security boundary
 
 - Solves multi-agent context loss, turn compaction, and context-window degradation without polluting commit logs.
 - Ephemeral task ledgers (`WORKING.md`) track pre-flight branch/HEAD hashes, verification commands, and `next_action` checkpoints.
-- Strict git shielding (`.gitignore` + `protect-main.ps1`) prevents `WORKING.md` from ever being committed to source control.
+- `.gitignore` plus the `protect-main.ps1` pre-commit hook keep `WORKING.md` and `.agents/state/` out of commits on every branch.
 - Completed tasks archive ephemeral state before removal, keeping permanent handover invariant intact.
 
 ### 6. Anti-Regression Triad Hierarchy

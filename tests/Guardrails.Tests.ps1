@@ -275,6 +275,18 @@ Describe 'check-markdown.ps1' {
         $result.Output | Should -Match 'BOM'
     }
 
+    It 'ignores git-ignored markdown (e.g. local session ledgers) when nothing is staged' {
+        [System.IO.File]::WriteAllText((Join-Path $Repo '.gitignore'), "ledger/`n")
+        New-Item -ItemType Directory -Path (Join-Path $Repo 'ledger') | Out-Null
+        [System.IO.File]::WriteAllBytes((Join-Path $Repo 'ledger/notes.md'), [System.Text.Encoding]::UTF8.GetBytes("# a`r`nb`r`n"))
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+
+    It 'still checks tracked markdown when nothing is staged' {
+        [System.IO.File]::WriteAllBytes((Join-Path $Repo 'README.md'), [System.Text.Encoding]::UTF8.GetBytes("# a`r`nb`r`n"))
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 1
+    }
+
     It 'allows staged LF markdown without BOM' {
         [System.IO.File]::WriteAllText((Join-Path $Repo 'doc.md'), "# a`nb`n")
         git -C $Repo add doc.md
