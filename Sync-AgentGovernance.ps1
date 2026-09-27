@@ -131,8 +131,9 @@ EXAMPLES:
         $AuditOnly = $true
     }
 
-    # Locate Central Hub (Prioritize development repo, then user home junction)
+    # Locate Central Hub (Prioritize template beside this script, then development repo, then user home junction)
     $hubCandidates = @(
+        (Join-Path $PSScriptRoot "template"),
         "C:\Users\omokolade\GitHub\agent-governance\template",
         (Join-Path $env:USERPROFILE ".agent-governance\template")
     )

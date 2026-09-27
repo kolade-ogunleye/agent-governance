@@ -18,7 +18,8 @@ This repository maintains the canonical multi-agent governance standards, determ
 - **Inspect Hub Status:** `Sync-AgentGovernance status`
 - **Run CLI Help:** `Sync-AgentGovernance -h`
 - **Test All Downstream Repos (Dry-Run):** `Sync-AgentGovernance audit -a`
-- **Validate Guardrail Scripts:** `Invoke-ScriptAnalyzer -Path . -Recurse`
+- **Validate Guardrail Scripts:** `Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1`
+- **Run Test Suite:** `Invoke-Pester ./tests` (Pester 6.2.0; engine tests are Windows-only until junctions are replaced)
 
 ---
 
