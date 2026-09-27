@@ -605,19 +605,17 @@ fi
 
                         if ($hasHandover -or $hasLessons -or $hasLegacy) {
                             $sec0 = [System.Collections.Generic.List[string]]::new()
-                            $sec0.Add("---")
-                            $sec0.Add("")
                             $sec0.Add("## 0. Operational Context & Historical Directives")
                             $sec0.Add("")
                             if ($hasHandover) {
                                 $sec0.Add("> [!IMPORTANT]")
-                                $sec0.Add("> Authoritative production architecture and live operational state is documented in [`$($stack.OperationalHandover)`]($($stack.OperationalHandover)).")
+                                $sec0.Add(("> Authoritative production architecture and live operational state is documented in [``{0}``]({0})." -f $stack.OperationalHandover))
                                 $sec0.Add("> Coding agents MUST consult this document for domain invariants, service tiers, and deployment conventions.")
                                 $sec0.Add("")
                             }
                             if ($hasLessons) {
                                 $sec0.Add("> [!WARNING]")
-                                $sec0.Add("> Critical domain traps and anti-regression directives are documented in [`$($stack.LessonsLearned)`]($($stack.LessonsLearned)).")
+                                $sec0.Add(("> Critical domain traps and anti-regression directives are documented in [``{0}``]({0})." -f $stack.LessonsLearned))
                                 $sec0.Add("> Agents MUST verify implementation plans against these lessons before proposing code or configuration changes.")
                                 $sec0.Add("")
                             }
@@ -627,6 +625,8 @@ fi
                                 $sec0.Add("> Agents MUST consult this document for historical architectural context, design decisions, and domain conventions.")
                                 $sec0.Add("")
                             }
+                            $sec0.Add("---")
+                            $sec0.Add("")
                             $sec0Block = ($sec0 -join "`n") + "`n"
 
                             if ($existingProject -match '(?m)^## 1\.') {
@@ -666,14 +666,14 @@ fi
 
                     if ($hasHandover) {
                         $pMd.Add("> [!IMPORTANT]")
-                        $pMd.Add("> Authoritative production architecture and live operational state is documented in [`$($stack.OperationalHandover)`]($($stack.OperationalHandover)).")
+                        $pMd.Add(("> Authoritative production architecture and live operational state is documented in [``{0}``]({0})." -f $stack.OperationalHandover))
                         $pMd.Add("> Coding agents MUST consult this document for domain invariants, service tiers, and deployment conventions.")
                         $pMd.Add("")
                     }
 
                     if ($hasLessons) {
                         $pMd.Add("> [!WARNING]")
-                        $pMd.Add("> Critical domain traps and anti-regression directives are documented in [`$($stack.LessonsLearned)`]($($stack.LessonsLearned)).")
+                        $pMd.Add(("> Critical domain traps and anti-regression directives are documented in [``{0}``]({0})." -f $stack.LessonsLearned))
                         $pMd.Add("> Agents MUST verify implementation plans against these lessons before proposing code or configuration changes.")
                         $pMd.Add("")
                     }
