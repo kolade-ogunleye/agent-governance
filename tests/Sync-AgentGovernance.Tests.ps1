@@ -100,6 +100,41 @@ Describe 'Sync-AgentGovernance' {
         git -C $Repo log -1 --format=%s | Should -Be 'chore(governance): install unified agent contract and deterministic guardrails'
     }
 
+    Context 'Codex and Gemini agent settings' {
+        It 'installs the Codex and Gemini settings templates when absent' {
+            Invoke-QuietSync -RepoPath $Repo
+
+            (Get-Content (Join-Path $Repo '.codex/config.toml') -Raw) | Should -BeExactly (Get-Content (Join-Path $HubDir '.codex/config.toml') -Raw)
+            (Get-Content (Join-Path $Repo '.gemini/settings.json') -Raw) | Should -BeExactly (Get-Content (Join-Path $HubDir '.gemini/settings.json') -Raw)
+        }
+
+        It 'upgrades the Gemini settings an earlier engine wrote inline' {
+            $legacy = "{`n  `"context`": {`n    `"fileName`": [`"AGENTS.md`", `"GEMINI.md`"]`n  }`n}`n"
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.gemini/settings.json' = $legacy }
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            (Get-Content (Join-Path $Repo '.gemini/settings.json') -Raw | ConvertFrom-Json).tools.confirmationRequired | Should -Not -BeNullOrEmpty
+        }
+
+        It 'keeps team-edited Codex settings' {
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.codex/config.toml' = "model = `"team-choice`"`n" }
+
+            Invoke-QuietSync -RepoPath $Repo
+
+            Get-Content (Join-Path $Repo '.codex/config.toml') -Raw | Should -BeExactly "model = `"team-choice`"`n"
+        }
+
+        It 'records managed agent settings in the lock' {
+            Invoke-QuietSync -RepoPath $Repo
+
+            $lock = Get-Content (Join-Path $Repo '.agent-governance.lock') -Raw | ConvertFrom-Json
+            foreach ($rel in @('.claude/settings.json', '.gemini/settings.json', '.codex/config.toml')) {
+                $lock.files.$rel | Should -Match '^[0-9a-f]{64}$'
+            }
+        }
+    }
+
     Context 'rollout findings' {
         It 'installs the governance gate in a linked worktree (hooks live in the common git dir)' {
             $worktree = Join-Path $TestDrive ("wt-" + [guid]::NewGuid().ToString('N'))

@@ -1,0 +1,6 @@
+# Managed by agent-governance (Sync-AgentGovernance); updated while unmodified, never after a team edit.
+# Codex loads project-scoped config only after you mark the project as trusted.
+# workspace-write: OS-level sandbox, writes limited to the workspace. on-request: Codex asks before
+# leaving the sandbox (for example, for network access such as git push).
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"

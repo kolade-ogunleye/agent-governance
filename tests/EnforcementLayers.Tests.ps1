@@ -218,6 +218,7 @@ Describe 'Governance gate hub pin consistency and freshness' {
         [System.IO.File]::WriteAllText($CheckScript, (Get-WorkflowStepScript -WorkflowPath (Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml') -StepName 'Check hub pin consistency and freshness'))
 
         function New-HubCheckout {
+            [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Creates disposable fixtures inside Pester TestDrive only.')]
             param([int]$AgeDays)
             # A checkout whose HEAD commit is $AgeDays old, standing in for _governance_hub.
             $dir = Join-Path $TestDrive ("hub-" + [guid]::NewGuid().ToString('N'))
@@ -272,6 +273,28 @@ Describe 'Governance gate hub pin consistency and freshness' {
     It 'skips the pin comparison when the gate runs from a local path (no SHA available)' {
         $hub = New-HubCheckout -AgeDays 2
         (Invoke-PinCheck -HubDir $hub.Dir -LockCommit $hub.Sha -GateSha '').ExitCode | Should -Be 0
+    }
+}
+
+Describe 'Codex and Gemini agent settings templates' {
+    It 'pins Codex to the workspace-write sandbox with on-request approvals' {
+        $toml = Get-Content (Join-Path $RepoRoot 'template' '.codex' 'config.toml') -Raw
+        $toml | Should -Match '(?m)^sandbox_mode = "workspace-write"$'
+        $toml | Should -Match '(?m)^approval_policy = "on-request"$'
+        $toml | Should -Not -Match 'danger-full-access'
+    }
+
+    It 'points Gemini CLI at AGENTS.md and forces confirmation for <_>' -ForEach @(
+        'run_shell_command(git push)', 'run_shell_command(git commit --no-verify)', 'run_shell_command(lefthook)'
+    ) {
+        $gemini = Get-Content (Join-Path $RepoRoot 'template' '.gemini' 'settings.json') -Raw | ConvertFrom-Json
+        $gemini.context.fileName | Should -Contain 'AGENTS.md'
+        $gemini.tools.confirmationRequired | Should -Contain $_
+    }
+
+    It 'leaves the Gemini sandbox unset (its behaviour without a container runtime is undocumented)' {
+        $gemini = Get-Content (Join-Path $RepoRoot 'template' '.gemini' 'settings.json') -Raw | ConvertFrom-Json
+        $gemini.tools.PSObject.Properties['sandbox'] | Should -BeNullOrEmpty
     }
 }
 

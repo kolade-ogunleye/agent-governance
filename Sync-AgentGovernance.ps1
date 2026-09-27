@@ -150,7 +150,7 @@ function Sync-AgentGovernance {
                 $plan.Add("update  $($file.Target)")
             }
         }
-        foreach ($optional in @('PROJECT.md', '.claude/settings.json', '.gemini/settings.json', '.agent-governance.lock')) {
+        foreach ($optional in @('PROJECT.md', '.claude/settings.json', '.gemini/settings.json', '.codex/config.toml', '.agent-governance.lock')) {
             if (-not (Test-Path -LiteralPath (Join-Path $TargetDir $optional))) { $plan.Add("create  $optional") }
         }
         $caller = Get-CallerWorkflow -HubDir $HubDir -RepoDir $TargetDir
@@ -247,6 +247,43 @@ function Sync-AgentGovernance {
             }
         }
         return $false
+    }
+
+    function Sync-ManagedToolFile {
+        [OutputType([pscustomobject])]
+        param(
+            [Parameter(Mandatory = $true)][string]$HubDir,
+            [Parameter(Mandatory = $true)][string]$RepoDir,
+            [Parameter(Mandatory = $true)][string]$RelativePath,
+            [AllowNull()][object]$PreviousLock,
+            [string[]]$LegacyContent = @()
+        )
+        # Agent settings are managed while unmodified: installed when absent, updated when they match the
+        # lock, any committed hub version, or content an earlier engine wrote; a team-edited file is kept.
+        $source = Join-Path $HubDir $RelativePath
+        $target = Join-Path $RepoDir $RelativePath
+        if (-not (Test-Path -LiteralPath $target)) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+            Copy-Item $source $target
+            return [pscustomobject]@{ Managed = $true; Action = 'installed' }
+        }
+        $current = Get-NormalizedHash -Path $target
+        if ($current -eq (Get-NormalizedHash -Path $source)) {
+            return [pscustomobject]@{ Managed = $true; Action = 'current' }
+        }
+        $locked = if ($PreviousLock) { [string]$PreviousLock.files.$RelativePath } else { '' }
+        $legacyHashes = foreach ($legacy in $LegacyContent) {
+            [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData(
+                    [System.Text.Encoding]::UTF8.GetBytes(($legacy -replace "`r`n", "`n")))).ToLowerInvariant()
+        }
+        $unmodified = ($locked -and $locked -eq $current) -or ($legacyHashes -contains $current) -or
+            (Test-MatchesHubHistory -HubDir $HubDir -TemplateRelativePath $RelativePath -FilePath $target)
+        if (-not $unmodified) {
+            return [pscustomobject]@{ Managed = $false; Action = 'kept' }
+        }
+        Remove-Item -LiteralPath $target -Force
+        Copy-Item $source $target
+        return [pscustomobject]@{ Managed = $true; Action = 'updated' }
     }
 
     function Show-HelpManual {
@@ -704,7 +741,7 @@ fi
             if ($status) {
                 $modifiedLines = ($status -split "`r?`n") | Where-Object { $_.Trim() }
                 $nonGovChanges = $modifiedLines | Where-Object { 
-                    $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.gemini|\.github|\.gitattributes|\.gitignore|AGENTS\.md|CLAUDE\.md|PROJECT\.md|WORKING\.md|lefthook\.yml|scripts/|docs/LEGACY-AGENT-NOTES\.md|\.agent-governance\.lock)' -and
+                    $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.codex|\.gemini|\.github|\.gitattributes|\.gitignore|AGENTS\.md|CLAUDE\.md|PROJECT\.md|WORKING\.md|lefthook\.yml|scripts/|docs/LEGACY-AGENT-NOTES\.md|\.agent-governance\.lock)' -and
                     $_ -notmatch '^ M (\.gitignore|\.gitattributes)' -and
                     $_ -notmatch '^ M (\.githooks|\.husky|\.git/hooks)' -and
                     # Line-ending-only drift (CRLF stored despite eol=lf) is renormalized by the sync, not project work.
@@ -823,27 +860,20 @@ fi
             Copy-Item (Join-Path $hubDir ".agents\rules\*") $agentsRulesDir -Force
             Copy-Item (Join-Path $hubDir "scripts\guardrails\*") $scriptsDir -Force
 
-            # 5b. Agent-native enforcement: Claude Code deny rules, OS sandbox, PreToolUse Bash guard.
-            # Managed while unmodified: updated when it matches the lock or any earlier hub version;
-            # a team-edited file is never overwritten.
-            $targetClaudeSettings = Join-Path $claudeDir "settings.json"
-            $hubClaudeSettings = Join-Path $hubDir ".claude" "settings.json"
-            $settingsManaged = $true
-            if (-not (Test-Path -LiteralPath $targetClaudeSettings)) {
-                Copy-Item $hubClaudeSettings $targetClaudeSettings
-                Write-Host "  ✔️ Installed Claude Code deny rules, sandbox, and Bash guard hook (.claude/settings.json)"
-            } elseif ((Get-NormalizedHash -Path $targetClaudeSettings) -ne (Get-NormalizedHash -Path $hubClaudeSettings)) {
-                $lockedSettings = if ($previousLock) { [string]$previousLock.files.'.claude/settings.json' } else { '' }
-                $unmodified = ($lockedSettings -and $lockedSettings -eq (Get-NormalizedHash -Path $targetClaudeSettings)) -or
-                    (Test-MatchesHubHistory -HubDir $hubDir -TemplateRelativePath '.claude/settings.json' -FilePath $targetClaudeSettings)
-                if ($unmodified) {
-                    Remove-Item -LiteralPath $targetClaudeSettings -Force
-                    Copy-Item $hubClaudeSettings $targetClaudeSettings
-                    Write-Host "  ✔️ Updated unmodified .claude/settings.json to the current hub version"
-                } else {
-                    $settingsManaged = $false
-                    Write-Warning "Kept team-edited .claude/settings.json; merge template/.claude/settings.json into it for the current agent guardrails (sandbox, deny rules, Bash guard)."
+            # 5b. Agent-native enforcement: Claude Code (deny rules, OS sandbox, Bash guard), Codex (sandbox,
+            # approvals), Gemini CLI (AGENTS.md context, confirmations). Managed while unmodified.
+            # The Gemini JSON an earlier engine wrote inline counts as an engine version, not a team edit.
+            $legacyGeminiSettings = "{`n  `"context`": {`n    `"fileName`": [`"AGENTS.md`", `"GEMINI.md`"]`n  }`n}`n"
+            $managedToolFiles = [System.Collections.Generic.List[string]]::new()
+            foreach ($toolFile in @('.claude/settings.json', '.gemini/settings.json', '.codex/config.toml')) {
+                $legacy = if ($toolFile -eq '.gemini/settings.json') { @($legacyGeminiSettings) } else { @() }
+                $result = Sync-ManagedToolFile -HubDir $hubDir -RepoDir $resolvedDir -RelativePath $toolFile -PreviousLock $previousLock -LegacyContent $legacy
+                switch ($result.Action) {
+                    'installed' { Write-Host "  ✔️ Installed agent settings: $toolFile" }
+                    'updated' { Write-Host "  ✔️ Updated unmodified $toolFile to the current hub version" }
+                    'kept' { Write-Warning "Kept team-edited $toolFile; merge template/$toolFile into it for the current agent guardrails." }
                 }
+                if ($result.Managed) { $managedToolFiles.Add($toolFile) }
             }
 
             # 5c. Server-side gate: managed caller workflow pinned to a pushed, clean hub commit.
@@ -1056,11 +1086,7 @@ fi
             }
             New-Item -ItemType Directory -Path $claudeRules -Force | Out-Null
             Copy-Item (Join-Path $hubDir ".agents" "rules" "*") $claudeRules -Force
-            # Gemini CLI reads context files named in .gemini/settings.json (it has no rules directory).
-            $geminiSettings = Join-Path $geminiDir "settings.json"
-            if (-not (Test-Path -LiteralPath $geminiSettings)) {
-                Set-Utf8LfContent -Path $geminiSettings -Content "{`n  `"context`": {`n    `"fileName`": [`"AGENTS.md`", `"GEMINI.md`"]`n  }`n}"
-            }
+            # Gemini CLI reads AGENTS.md through .gemini/settings.json (step 5b); it has no rules directory.
 
             # 11. Intelligent Git Hook Reconciliation
             Sync-GitHook -targetDir $resolvedDir
@@ -1079,8 +1105,8 @@ fi
                     $lockFiles[$file.Target] = Get-NormalizedHash -Path $managedPath
                 }
             }
-            if ($settingsManaged -and (Test-Path -LiteralPath $targetClaudeSettings)) {
-                $lockFiles['.claude/settings.json'] = Get-NormalizedHash -Path $targetClaudeSettings
+            foreach ($toolFile in $managedToolFiles) {
+                $lockFiles[$toolFile] = Get-NormalizedHash -Path (Join-Path $resolvedDir $toolFile)
             }
             if ((Test-Path -LiteralPath $callerWorkflowPath) -and ([System.IO.File]::ReadAllText($callerWorkflowPath) -match '(?m)^# Managed by agent-governance')) {
                 $lockFiles['.github/workflows/agent-governance.yml'] = Get-NormalizedHash -Path $callerWorkflowPath
@@ -1129,7 +1155,7 @@ fi
                     $stageItems = @(
                         "AGENTS.md", "CLAUDE.md", "PROJECT.md", "lefthook.yml",
                         ".agents", ".claude", ".gemini", ".github",
-                        ".gitignore", ".gitattributes", ".agent-governance.lock",
+                        ".gitignore", ".gitattributes", ".agent-governance.lock", ".codex",
                         "scripts/guardrails", "docs/LEGACY-AGENT-NOTES.md"
                     )
                     foreach ($item in $stageItems) {

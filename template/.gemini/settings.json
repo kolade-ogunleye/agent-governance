@@ -1,0 +1,15 @@
+{
+  "context": {
+    "fileName": ["AGENTS.md", "GEMINI.md"]
+  },
+  "tools": {
+    "confirmationRequired": [
+      "run_shell_command(git push)",
+      "run_shell_command(git commit --no-verify)",
+      "run_shell_command(git -c core.hooksPath)",
+      "run_shell_command(git config core.hooksPath)",
+      "run_shell_command(lefthook)",
+      "run_shell_command(LEFTHOOK=0)"
+    ]
+  }
+}
