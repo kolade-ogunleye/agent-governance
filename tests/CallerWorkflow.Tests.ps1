@@ -10,7 +10,10 @@ BeforeAll {
     Copy-Item (Join-Path $realHub 'Sync-AgentGovernance.ps1') $HubRoot
     Copy-Item (Join-Path $realHub 'template') $HubRoot -Recurse
     git init --quiet --bare --initial-branch=main $HubRemote
+    # No background auto-gc: a detached gc can hold object files open while Pester removes TestDrive.
+    git -C $HubRemote config gc.auto 0
     git -C $HubRoot init --quiet --initial-branch=main
+    git -C $HubRoot config gc.auto 0
     git -C $HubRoot config user.email 'hub@example.invalid'
     git -C $HubRoot config user.name 'Hub'
     git -C $HubRoot config commit.gpgsign false
@@ -27,6 +30,14 @@ BeforeAll {
         $path = Join-Path $RepoPath '.github/workflows/agent-governance.yml'
         if (Test-Path -LiteralPath $path) { return [System.IO.File]::ReadAllText($path) }
         return $null
+    }
+}
+
+AfterAll {
+    # Git writes object files read-only on Windows; clear the flag so Pester can delete TestDrive.
+    foreach ($root in @($HubRoot, $HubRemote)) {
+        Get-ChildItem -LiteralPath $root -Recurse -Force -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.IsReadOnly } | ForEach-Object { $_.IsReadOnly = $false }
     }
 }
 
