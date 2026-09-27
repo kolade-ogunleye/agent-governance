@@ -508,4 +508,66 @@ Describe 'audit-dependencies.ps1' {
         (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
         Get-Content (Join-Path $Repo '.args-pnpm') -Raw | Should -Match '^audit --audit-level=high'
     }
+
+    Context 'yarn, Go, and composer coverage' {
+        BeforeEach {
+            foreach ($tool in @('yarn', 'govulncheck', 'composer')) {
+                New-CommandShim -Directory $ShimDir -Name $tool -MarkerPath (Join-Path $Repo ".args-$tool")
+            }
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'package.json'), '{ "name": "fixture" }')
+        }
+
+        It 'blocks Yarn classic when the exit bitmask reports <Name> advisories' -ForEach @(
+            @{ Name = 'HIGH'; Code = 8 }, @{ Name = 'CRITICAL'; Code = 16 }, @{ Name = 'LOW+HIGH'; Code = 10 }
+        ) {
+            New-CommandShim -Directory $ShimDir -Name 'yarn' -ExitCode $Code -MarkerPath (Join-Path $Repo '.args-yarn')
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'yarn.lock'), "# yarn lockfile v1`n")
+            (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 1
+            Get-Content (Join-Path $Repo '.args-yarn') -Raw | Should -Match '^audit'
+        }
+
+        It 'does not block Yarn classic for <Name>-only advisories' -ForEach @(
+            @{ Name = 'INFO+LOW+MODERATE'; Code = 7 }, @{ Name = 'no'; Code = 0 }
+        ) {
+            New-CommandShim -Directory $ShimDir -Name 'yarn' -ExitCode $Code -MarkerPath (Join-Path $Repo '.args-yarn')
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'yarn.lock'), "# yarn lockfile v1`n")
+            (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+        }
+
+        It 'uses yarn npm audit for Yarn Berry projects (.yarnrc.yml)' {
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'yarn.lock'), "__metadata:`n  version: 8`n")
+            [System.IO.File]::WriteAllText((Join-Path $Repo '.yarnrc.yml'), "nodeLinker: node-modules`n")
+            (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+            Get-Content (Join-Path $Repo '.args-yarn') -Raw | Should -Match '^npm audit --all --recursive --severity high'
+        }
+
+        It 'blocks Yarn Berry when it reports advisories at or above high' {
+            New-CommandShim -Directory $ShimDir -Name 'yarn' -ExitCode 1
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'yarn.lock'), "__metadata:`n  version: 8`n")
+            [System.IO.File]::WriteAllText((Join-Path $Repo '.yarnrc.yml'), "nodeLinker: node-modules`n")
+            (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 1
+        }
+
+        It 'audits a Go module with govulncheck and blocks on findings' {
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'go.mod'), "module example.com/fixture`n")
+            (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+            (Get-Content (Join-Path $Repo '.args-govulncheck') -Raw).Trim() | Should -BeExactly './...'
+
+            New-CommandShim -Directory $ShimDir -Name 'govulncheck' -ExitCode 3
+            (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 1
+        }
+
+        It 'audits composer.lock at high severity without failing on abandoned packages' {
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'composer.json'), '{ "name": "acme/fixture" }')
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'composer.lock'), '{ "packages": [] }')
+            (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+            $argsText = Get-Content (Join-Path $Repo '.args-composer') -Raw
+            $argsText | Should -Match '^audit --locked'
+            $argsText | Should -Match '--ignore-severity low --ignore-severity medium'
+            $argsText | Should -Match '--abandoned=report'
+
+            New-CommandShim -Directory $ShimDir -Name 'composer' -ExitCode 1
+            (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 1
+        }
+    }
 }

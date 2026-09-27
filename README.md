@@ -74,8 +74,8 @@ Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
 
 Ordered from hardest to easiest to bypass:
 
-1. **Default-branch ruleset (cannot be bypassed from a clone; only repository admins can change it):** applied to GitHub with `./Set-GovernanceRuleset.ps1 -Repository owner/name` (dry-run with `-WhatIf`). Requires pull requests and blocks force-pushes and deletion.
-2. **Governance gate (cannot be bypassed from a clone once the ruleset requires it):** the reusable workflow `.github/workflows/governance-gate.yml`, called by commit SHA, scans full history with Gitleaks and enforces branch naming on pull requests.
+1. **Default-branch ruleset (cannot be bypassed from a clone; only repository admins can change it):** applied to GitHub with `./Set-GovernanceRuleset.ps1 -Repository owner/name` (dry-run with `-WhatIf`). Requires pull requests and blocks force-pushes and deletion. Rulesets on private repositories need GitHub Pro, Team, or Enterprise; on a free plan the API returns 403 and this layer is unavailable.
+2. **Governance gate (cannot be bypassed from a clone once the ruleset requires it):** the reusable workflow `.github/workflows/governance-gate.yml`, called by commit SHA, scans full history with Gitleaks, enforces branch naming on pull requests, and verifies managed files against the hub at the commit in `.agent-governance.lock` using the hub's own verifier. For a private hub, pass a read-only `hub_token` secret; without one the integrity job warns and skips.
 3. **Agent permissions:** `.claude/settings.json` denies `Read`/`Edit` of secret files and runs a PreToolUse guard that blocks `--no-verify`, `LEFTHOOK=0`, `lefthook install`, `core.hooksPath` overrides, and pushes to `main`. Wrapper scripts and subprocesses can still evade it, so layers 1 and 2 remain the backstop.
 4. **Local hooks:** Lefthook pre-commit and pre-push, fail-closed for detected agent sessions. Skippable with `--no-verify`; the layers above catch what they miss.
 5. **Contract and rules:** `AGENTS.md` and `.agents/rules/` guide agents but do not block anything.
@@ -133,9 +133,11 @@ and compares managed content with the supplied template. Select the trusted
 checkout version yourself; the verifier does not fetch or authenticate the
 commit recorded in the lock. Markdown comparisons tolerate whitespace changes.
 
-The reusable CI workflow currently enforces secrets and branch policy. Integrity
-verification must be invoked separately from a trusted checkout; neither a
-repository-local lock nor its local verifier is a tamper-proof security boundary.
+The reusable CI workflow runs this trusted comparison automatically: it checks
+out the hub at the locked commit and runs the hub's verifier against the caller.
+The locked commit is still caller-chosen, so the check proves the files match a
+real hub version, not the newest one. A repository-local lock and verifier on
+their own are not a tamper-proof security boundary.
 
 ### 4. Lockfile-Aware Polyglot Detection
 

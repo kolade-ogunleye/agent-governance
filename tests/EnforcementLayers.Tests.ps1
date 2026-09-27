@@ -92,6 +92,39 @@ Describe 'Claude Code settings template' {
     }
 }
 
+Describe 'Governance gate workflow' {
+    BeforeAll {
+        $script:Gate = Get-Content (Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml') -Raw
+    }
+
+    It 'defines secret-scan, branch-policy, and integrity jobs' {
+        foreach ($job in @('secret-scan', 'branch-policy', 'integrity')) {
+            $Gate | Should -Match "(?m)^  ${job}:\s*$"
+        }
+    }
+
+    It 'validates the locked hub commit as a full SHA before using it as a checkout ref' {
+        $Gate | Should -Match "\^\[0-9a-f\]\{40\}\$"
+        $Gate | Should -Match 'ref: \$\{\{ steps\.lock\.outputs\.commit \}\}'
+    }
+
+    It 'runs the hub''s own verifier copy, not the caller''s' {
+        $Gate | Should -Match 'run: \./_governance_hub/template/scripts/guardrails/verify-governance\.ps1 -HubTemplate \./_governance_hub/template'
+    }
+
+    It 'never interpolates caller-controlled values directly into run scripts' {
+        foreach ($block in [regex]::Matches($Gate, '(?ms)^\s+run: \|\n(.*?)(?=^\s{6}- |\z)')) {
+            $block.Groups[1].Value | Should -Not -Match '\$\{\{\s*(inputs\.|github\.head_ref)'
+        }
+    }
+
+    It 'pins every action to a full commit SHA' {
+        foreach ($uses in [regex]::Matches($Gate, '(?m)^\s+uses:\s+(\S+)')) {
+            $uses.Groups[1].Value | Should -Match '@[0-9a-f]{40}$'
+        }
+    }
+}
+
 Describe 'Default-branch ruleset' {
     BeforeAll {
         $script:RulesetPath = Join-Path $RepoRoot 'rulesets' 'default-branch-protection.json'

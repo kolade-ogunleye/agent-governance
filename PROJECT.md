@@ -35,7 +35,7 @@ This repository maintains the canonical multi-agent governance standards, determ
   - `template/.claude/settings.json`: Claude Code secret deny rules + PreToolUse Bash guard (deployed only when a repo has none).
 - `Sync-AgentGovernance.ps1`: The orchestration and reconciliation engine.
 - `Set-GovernanceRuleset.ps1` + `rulesets/`: Server-side default-branch ruleset (non-bypassable layer). Dry-run first: `./Set-GovernanceRuleset.ps1 -Repository owner/name -WhatIf`.
-- `.github/workflows/governance-gate.yml`: Reusable CI gate (full-history Gitleaks, PR branch policy) for downstream repositories to call by commit SHA.
+- `.github/workflows/governance-gate.yml`: Reusable CI gate (full-history Gitleaks, PR branch policy, lock integrity against the hub; optional `hub_token` secret for a private hub) for downstream repositories to call by commit SHA.
 - `tests/`: Pester suite for the engine, guardrails, and enforcement layers.
 - `docs/adr/`: Architecture decision records (e.g. `0001-distribution-model.md`: why the sync engine is kept over Copier).
 - `WORKING.md`: Ephemeral session continuity ledger (local working memory, shielded from git).

@@ -20,7 +20,40 @@ if (Test-Path "package.json") {
         & npm audit --audit-level=high
         if ($LASTEXITCODE -ne 0) { $vulnerabilitiesFound = $true }
     } elseif (Test-Path "yarn.lock") {
-        Write-AuditSkip "yarn.lock detected; yarn auditing is not yet supported by this guardrail."
+        if (Test-Path ".yarnrc.yml") {
+            # Yarn Berry (2+): non-zero exit when advisories at or above --severity are reported.
+            Write-Host "🔍 Auditing Node.js dependencies via yarn npm audit..."
+            & yarn npm audit --all --recursive --severity high
+            if ($LASTEXITCODE -ne 0) { $vulnerabilitiesFound = $true }
+        } else {
+            # Yarn classic: --level only filters output; the exit code is a severity bitmask
+            # (1 info, 2 low, 4 moderate, 8 high, 16 critical), so block on the high/critical bits.
+            Write-Host "🔍 Auditing Node.js dependencies via yarn audit..."
+            & yarn audit --level high
+            if (($LASTEXITCODE -band 24) -ne 0) { $vulnerabilitiesFound = $true }
+        }
+    }
+}
+
+# 1b. Go Module Audit
+if (Test-Path "go.mod") {
+    if (Get-Command "govulncheck" -ErrorAction SilentlyContinue) {
+        Write-Host "🔍 Auditing Go dependencies via govulncheck..."
+        & govulncheck ./...
+        if ($LASTEXITCODE -ne 0) { $vulnerabilitiesFound = $true }
+    } else {
+        Write-AuditSkip "go.mod detected but govulncheck is not installed."
+    }
+}
+
+# 1c. PHP Composer Audit (lock file, high and critical only; abandoned packages are reported, not blocking)
+if (Test-Path "composer.lock") {
+    if (Get-Command "composer" -ErrorAction SilentlyContinue) {
+        Write-Host "🔍 Auditing PHP dependencies via composer audit..."
+        & composer audit --locked --ignore-severity low --ignore-severity medium --abandoned=report
+        if ($LASTEXITCODE -ne 0) { $vulnerabilitiesFound = $true }
+    } else {
+        Write-AuditSkip "composer.lock detected but composer is not installed."
     }
 }
 
