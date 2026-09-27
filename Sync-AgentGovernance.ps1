@@ -291,6 +291,24 @@ EXAMPLES:
             }
         }
 
+        # 9. Lessons Learned & Anti-Regression Document Detection
+        $lessonsCandidates = @(
+            "LESSONS_LEARNED.md",
+            "docs/LESSONS_LEARNED.md",
+            "LESSONS-LEARNED.md",
+            "docs/LESSONS-LEARNED.md",
+            "TRAPS.md",
+            "docs/TRAPS.md"
+        )
+        $detectedLessons = $null
+        foreach ($candidate in $lessonsCandidates) {
+            $candidatePath = Join-Path $targetDir $candidate
+            if (Test-Path $candidatePath) {
+                $detectedLessons = $candidate
+                break
+            }
+        }
+
         return @{
             Name = $repoName
             PrimaryStack = ($types -join " + ")
@@ -298,6 +316,7 @@ EXAMPLES:
             PackageManagers = ($packageManagers -join ", ")
             Runbook = $runbook
             OperationalHandover = $detectedHandover
+            LessonsLearned = $detectedLessons
         }
     }
 
@@ -591,8 +610,9 @@ fi
 
                 $hasLegacy = (Test-Path (Join-Path $docsDir "LEGACY-AGENT-NOTES.md")) -or $hasPreservedLegacy
                 $hasHandover = [bool]$stack.OperationalHandover
+                $hasLessons = [bool]$stack.LessonsLearned
 
-                if ($hasHandover -or $hasLegacy) {
+                if ($hasHandover -or $hasLessons -or $hasLegacy) {
                     $pMd.Add("---")
                     $pMd.Add("")
                     $pMd.Add("## 0. Operational Context & Historical Directives")
@@ -602,6 +622,13 @@ fi
                         $pMd.Add("> [!IMPORTANT]")
                         $pMd.Add("> Authoritative production architecture and live operational state is documented in [`$($stack.OperationalHandover)`]($($stack.OperationalHandover)).")
                         $pMd.Add("> Coding agents MUST consult this document for domain invariants, service tiers, and deployment conventions.")
+                        $pMd.Add("")
+                    }
+
+                    if ($hasLessons) {
+                        $pMd.Add("> [!WARNING]")
+                        $pMd.Add("> Critical domain traps and anti-regression directives are documented in [`$($stack.LessonsLearned)`]($($stack.LessonsLearned)).")
+                        $pMd.Add("> Agents MUST verify implementation plans against these lessons before proposing code or configuration changes.")
                         $pMd.Add("")
                     }
 

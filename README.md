@@ -90,6 +90,21 @@ Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
 - Inspects repository manifests (`package.json`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `pyproject.toml`, `uv.lock`, `Cargo.toml`, `go.mod`, `ansible/`, `*.ps1`).
 - Tailors `PROJECT.md` runbooks and executes exact project-native package managers during supply-chain audits and test runs.
 
+### 5. Session Continuity & Write-Ahead Ledgers (`WORKING.md`)
+
+- Solves multi-agent context loss, turn compaction, and context-window degradation without polluting commit logs.
+- Ephemeral task ledgers (`WORKING.md`) track pre-flight branch/HEAD hashes, verification commands, and `next_action` checkpoints.
+- Strict git shielding (`.gitignore` + `protect-main.ps1`) prevents `WORKING.md` from ever being committed to source control.
+- Completed tasks archive ephemeral state before removal, keeping permanent handover invariant intact.
+
+### 6. Anti-Regression Triad Hierarchy
+
+- Synchronizes permanent institutional memory alongside lean universal contracts.
+- Categorizes repository knowledge into three distinct precedence tiers in `PROJECT.md` Section 0:
+  1. `[!IMPORTANT]` **Operational Handover Spec:** (`HANDOVER.md` / `docs/CURRENT-STATE.md`) authoritative system architecture and domain models.
+  2. `[!WARNING]` **Anti-Regression Lessons Learned:** (`LESSONS_LEARNED.md` / `TRAPS.md`) real-world architectural traps and hard-won postmortems.
+  3. `[!NOTE]` **Archived Legacy Agent Instructions:** (`docs/LEGACY-AGENT-NOTES.md`) preserved instructions prior to governance adoption.
+
 ---
 
 ## 📄 License

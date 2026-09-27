@@ -13,8 +13,15 @@ if (-not $repoRoot) { exit 0 }
 $criticalFiles = @(
     "AGENTS.md",
     "lefthook.yml",
+    ".gitattributes",
     ".agents/rules/languages.md",
-    ".agents/rules/security-performance.md"
+    ".agents/rules/security-performance.md",
+    "scripts/guardrails/check-markdown.ps1",
+    "scripts/guardrails/protect-main.ps1",
+    "scripts/guardrails/detect-secrets.ps1",
+    "scripts/guardrails/guard-tests.ps1",
+    "scripts/guardrails/audit-dependencies.ps1",
+    "scripts/guardrails/run-tests.ps1"
 )
 
 $hasDrift = $false

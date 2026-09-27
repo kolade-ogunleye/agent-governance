@@ -8,16 +8,27 @@ on:
 
 jobs:
   verify:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Lefthook & Gitleaks
+      - name: Install Lefthook & Gitleaks (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           winget install evilmartians.lefthook --accept-source-agreements --accept-package-agreements
           winget install Gitleaks.Gitleaks --accept-source-agreements --accept-package-agreements
+
+      - name: Install Lefthook & Gitleaks (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/evilmartians/lefthook/master/bin/install.sh | sudo sh -s -- -d -b /usr/local/bin
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | sudo tar -xz -C /usr/local/bin gitleaks
 
       - name: Verify PowerShell Scripts syntax
         shell: pwsh

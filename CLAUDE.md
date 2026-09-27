@@ -28,7 +28,7 @@ Before modifying any files or presenting your plan, you MUST adopt a **Devil's A
 ## 3. PROJECT CONTEXT & LAYERED ARCHITECTURE
 
 1. **Project Specification:** Before undertaking work, you MUST read `PROJECT.md` at the repository root for repository-specific architecture, tech stack, build commands, and test targets.
-2. **Precedence & Dual-Contract:** Universal operating rules in this contract ALWAYS take absolute precedence over repository-specific instructions in case of conflict. However, domain instructions (e.g. in `PROJECT.md`, `HANDOVER.md`, or `docs/LEGACY-AGENT-NOTES.md`) retain authoritative control over application business logic, domain models, workflows, and task sequencing. Agents MUST cite both universal standards and domain-specific notes in their implementation plan.
+2. **Precedence & Dual-Contract:** Universal operating rules in this contract ALWAYS take absolute precedence over repository-specific instructions in case of conflict. However, domain instructions (e.g. in `PROJECT.md`, `HANDOVER.md`, `LESSONS_LEARNED.md`, or `docs/LEGACY-AGENT-NOTES.md`) retain authoritative control over application business logic, domain models, workflows, and task sequencing. Agents MUST cite both universal standards and domain-specific notes in their implementation plan.
 
 ## 4. PROGRESSIVE DISCLOSURE & MANDATORY CITATION GATE
 
