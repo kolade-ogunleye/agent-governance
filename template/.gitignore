@@ -45,6 +45,7 @@ __pycache__/
 .coverage
 htmlcov/
 .eslintcache
+testResults.xml
 .turbo/
 .cache/
 
