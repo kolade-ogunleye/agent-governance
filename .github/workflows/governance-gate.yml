@@ -10,6 +10,10 @@ on:
         description: Hub repository (owner/name) that the caller's .agent-governance.lock refers to.
         type: string
         default: kolade-ogunleye/agent-governance
+      full_history_secret_scan:
+        description: Scan the entire history instead of only the commits a pull request or push introduces.
+        type: boolean
+        default: false
     secrets:
       hub_token:
         description: Read-only contents token for the hub. Required only when the hub repository is private.
@@ -41,8 +45,35 @@ jobs:
           tar -xzf "$archive" gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
 
-      - name: Scan full history for secrets
-        run: gitleaks git --no-banner --redact --exit-code 1 .
+      - name: Scan for secrets
+        # Pull requests and pushes scan only the commits they introduce, so known, tracked historical
+        # findings do not block every change; schedule, manual runs, and full_history_secret_scan scan
+        # all history. Event values arrive via env and are validated as SHAs before use.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FULL_HISTORY: ${{ inputs.full_history_secret_scan }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          is_commit() { [[ "$1" =~ ^[0-9a-f]{40}$ && ! "$1" =~ ^0+$ ]] && git cat-file -e "$1^{commit}" 2>/dev/null; }
+          range=""
+          if [[ "$FULL_HISTORY" != "true" ]]; then
+            if [[ "$EVENT_NAME" == "pull_request" ]] && is_commit "$PR_BASE_SHA" && is_commit "$PR_HEAD_SHA"; then
+              range="$PR_BASE_SHA..$PR_HEAD_SHA"
+            elif [[ "$EVENT_NAME" == "push" ]] && is_commit "$PUSH_BEFORE_SHA" && is_commit "$PUSH_AFTER_SHA"; then
+              range="$PUSH_BEFORE_SHA..$PUSH_AFTER_SHA"
+            fi
+          fi
+          if [[ -n "$range" ]]; then
+            echo "Scanning commits in $range"
+            gitleaks git --no-banner --redact --exit-code 1 --log-opts="$range" .
+          else
+            echo "Scanning full history (event: $EVENT_NAME)"
+            gitleaks git --no-banner --redact --exit-code 1 .
+          fi
 
   branch-policy:
     if: github.event_name == 'pull_request'
