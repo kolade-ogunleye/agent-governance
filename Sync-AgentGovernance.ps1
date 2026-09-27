@@ -226,6 +226,29 @@ function Sync-AgentGovernance {
         return [pscustomobject]@{ Content = $content; Reason = $null }
     }
 
+    function Test-MatchesHubHistory {
+        [OutputType([bool])]
+        param(
+            [Parameter(Mandatory = $true)][string]$HubDir,
+            [Parameter(Mandatory = $true)][string]$TemplateRelativePath,
+            [Parameter(Mandatory = $true)][string]$FilePath
+        )
+        # True when the file equals any committed hub version of the template: the engine wrote it and
+        # nobody has edited it since, so replacing it with the current version loses nothing.
+        $hubRepoRoot = Split-Path -Parent $HubDir
+        $gitPath = "template/$TemplateRelativePath"
+        $target = Get-NormalizedHash -Path $FilePath
+        foreach ($commit in @(git -C $hubRepoRoot log --format=%H -- $gitPath 2>$null)) {
+            $content = (@(git -C $hubRepoRoot show "${commit}:$gitPath" 2>$null) -join "`n") + "`n"
+            if ($LASTEXITCODE -ne 0) { continue }
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes(($content -replace "`r`n", "`n"))
+            if ([System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant() -eq $target) {
+                return $true
+            }
+        }
+        return $false
+    }
+
     function Show-HelpManual {
         Write-Host @"
 
@@ -800,14 +823,27 @@ fi
             Copy-Item (Join-Path $hubDir ".agents\rules\*") $agentsRulesDir -Force
             Copy-Item (Join-Path $hubDir "scripts\guardrails\*") $scriptsDir -Force
 
-            # 5b. Agent-native enforcement: Claude Code deny rules + PreToolUse Bash guard.
-            # Project settings are team-owned, so an existing file is never overwritten.
+            # 5b. Agent-native enforcement: Claude Code deny rules, OS sandbox, PreToolUse Bash guard.
+            # Managed while unmodified: updated when it matches the lock or any earlier hub version;
+            # a team-edited file is never overwritten.
             $targetClaudeSettings = Join-Path $claudeDir "settings.json"
-            if (-not (Test-Path $targetClaudeSettings)) {
-                Copy-Item (Join-Path $hubDir ".claude" "settings.json") $targetClaudeSettings
-                Write-Host "  ✔️ Installed Claude Code secret deny rules and Bash guard hook (.claude/settings.json)"
-            } elseif ((Get-Content $targetClaudeSettings -Raw) -notmatch 'agent-bash-guard\.ps1') {
-                Write-Warning "Kept existing .claude/settings.json; merge template/.claude/settings.json into it to enable agent guardrails."
+            $hubClaudeSettings = Join-Path $hubDir ".claude" "settings.json"
+            $settingsManaged = $true
+            if (-not (Test-Path -LiteralPath $targetClaudeSettings)) {
+                Copy-Item $hubClaudeSettings $targetClaudeSettings
+                Write-Host "  ✔️ Installed Claude Code deny rules, sandbox, and Bash guard hook (.claude/settings.json)"
+            } elseif ((Get-NormalizedHash -Path $targetClaudeSettings) -ne (Get-NormalizedHash -Path $hubClaudeSettings)) {
+                $lockedSettings = if ($previousLock) { [string]$previousLock.files.'.claude/settings.json' } else { '' }
+                $unmodified = ($lockedSettings -and $lockedSettings -eq (Get-NormalizedHash -Path $targetClaudeSettings)) -or
+                    (Test-MatchesHubHistory -HubDir $hubDir -TemplateRelativePath '.claude/settings.json' -FilePath $targetClaudeSettings)
+                if ($unmodified) {
+                    Remove-Item -LiteralPath $targetClaudeSettings -Force
+                    Copy-Item $hubClaudeSettings $targetClaudeSettings
+                    Write-Host "  ✔️ Updated unmodified .claude/settings.json to the current hub version"
+                } else {
+                    $settingsManaged = $false
+                    Write-Warning "Kept team-edited .claude/settings.json; merge template/.claude/settings.json into it for the current agent guardrails (sandbox, deny rules, Bash guard)."
+                }
             }
 
             # 5c. Server-side gate: managed caller workflow pinned to a pushed, clean hub commit.
@@ -1042,6 +1078,9 @@ fi
                 if (Test-Path -LiteralPath $managedPath -PathType Leaf) {
                     $lockFiles[$file.Target] = Get-NormalizedHash -Path $managedPath
                 }
+            }
+            if ($settingsManaged -and (Test-Path -LiteralPath $targetClaudeSettings)) {
+                $lockFiles['.claude/settings.json'] = Get-NormalizedHash -Path $targetClaudeSettings
             }
             if ((Test-Path -LiteralPath $callerWorkflowPath) -and ([System.IO.File]::ReadAllText($callerWorkflowPath) -match '(?m)^# Managed by agent-governance')) {
                 $lockFiles['.github/workflows/agent-governance.yml'] = Get-NormalizedHash -Path $callerWorkflowPath

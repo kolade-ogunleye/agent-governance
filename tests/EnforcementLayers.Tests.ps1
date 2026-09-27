@@ -82,6 +82,19 @@ Describe 'Claude Code settings template' {
         $deny.IndexOf('Read(!.env.example)') | Should -BeGreaterThan $deny.IndexOf('Read(.env.*)')
     }
 
+    It 'enables the OS sandbox without auto-approving sandboxed commands' {
+        $Settings.sandbox.enabled | Should -BeTrue
+        $Settings.sandbox.autoAllowBashIfSandboxed | Should -BeFalse
+    }
+
+    It 'keeps the sandbox warn-and-continue on unsupported platforms such as native Windows' {
+        $Settings.sandbox.PSObject.Properties['failIfUnavailable'] | Should -BeNullOrEmpty
+    }
+
+    It 'denies sandboxed reads of <_>' -ForEach @('~/.ssh', '~/.aws', '~/.gnupg', '~/.config/gh', '~/.git-credentials', './**/.env') {
+        $Settings.sandbox.filesystem.denyRead | Should -Contain $_
+    }
+
     It 'wires the Bash guard as a PreToolUse hook for Bash and PowerShell in exec form' {
         $entry = @($Settings.hooks.PreToolUse)[0]
         $entry.matcher | Should -Be 'Bash|PowerShell'
