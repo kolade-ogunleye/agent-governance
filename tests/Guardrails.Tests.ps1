@@ -414,7 +414,8 @@ Describe 'verify-governance.ps1' {
     }
 
     It 'passes with a notice when the repository has no lock yet' {
-        Remove-Item -LiteralPath (Join-Path $Repo '.agent-governance.lock')
+        # -Force: PowerShell treats dotfiles as hidden on Linux and macOS.
+        Remove-Item -LiteralPath (Join-Path $Repo '.agent-governance.lock') -Force
         $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match 'No \.agent-governance\.lock'
