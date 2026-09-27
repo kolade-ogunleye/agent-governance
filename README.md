@@ -83,6 +83,10 @@ Ordered from hardest to easiest to bypass:
 4. **Local hooks:** Lefthook pre-commit and pre-push, fail-closed for detected agent sessions. Skippable with `--no-verify`; the layers above catch what they miss.
 5. **Contract and rules:** `AGENTS.md` and `.agents/rules/` guide agents but do not block anything.
 
+## 🔁 Keeping the Fleet in Sync
+
+`fleet.json` lists the governed repositories. `.github/workflows/downstream-sync.yml` runs weekly (and on demand) from `main`: for each repository it runs `Invoke-DownstreamSync.ps1`, which branches from the latest default branch, re-syncs, and opens or updates a `chore/agent-governance-sync-<hub-sha>` pull request. It needs an `AGENT_GOVERNANCE_SYNC_TOKEN` secret in the hub (a fine-grained token limited to the fleet repositories, with Contents and Pull requests read/write); without it the job warns and skips. CODEOWNERS is intentionally not shipped for solo, private repositories (see `docs/adr/0002-no-codeowners-for-solo-private-repos.md`).
+
 ## 📏 Measuring Compliance
 
 - **Policy-coverage eval (deterministic, runs in CI):** `evals/Invoke-PolicyEval.ps1` replays contract-forbidden agent actions and look-alike legitimate work against the real Bash guard and pre-commit guardrails. Current result: 18/18 forbidden actions blocked, 0/9 false positives. It measures the enforcement machinery, not model judgement.

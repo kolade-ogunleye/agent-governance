@@ -36,6 +36,7 @@ This repository maintains the canonical multi-agent governance standards, determ
   - `template/.codex/config.toml`, `template/.gemini/settings.json`: Codex and Gemini CLI agent settings (managed while unmodified).
   - `template/.claude/settings.json`: Claude Code secret deny rules + PreToolUse Bash guard (deployed only when a repo has none).
 - `Sync-AgentGovernance.ps1`: The orchestration and reconciliation engine.
+- `fleet.json` + `Invoke-DownstreamSync.ps1` + `.github/workflows/downstream-sync.yml`: Weekly automated re-sync pull requests for the governed repositories (needs the `AGENT_GOVERNANCE_SYNC_TOKEN` secret).
 - `Set-GovernanceRuleset.ps1` + `rulesets/`: Server-side default-branch ruleset (non-bypassable layer). Dry-run first: `./Set-GovernanceRuleset.ps1 -Repository owner/name -WhatIf`.
 - `.github/workflows/governance-gate.yml`: Reusable CI gate (full-history Gitleaks, PR branch policy, lock integrity against the hub; optional `hub_token` secret for a private hub) for downstream repositories to call by commit SHA.
 - `tests/`: Pester suite for the engine, guardrails, and enforcement layers.

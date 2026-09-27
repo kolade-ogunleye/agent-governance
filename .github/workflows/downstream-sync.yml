@@ -1,0 +1,84 @@
+name: Downstream Sync
+
+# Weekly (and on demand) re-sync of every repository in fleet.json, opening or updating one pull request per
+# repository. Requires the AGENT_GOVERNANCE_SYNC_TOKEN secret: a fine-grained token limited to the fleet
+# repositories with Contents and Pull requests read/write. Without it the job warns and skips.
+on:
+  schedule:
+    - cron: "43 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      repositories: ${{ steps.fleet.outputs.repositories }}
+    steps:
+      - name: Checkout hub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read fleet.json
+        id: fleet
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repos = @((Get-Content fleet.json -Raw | ConvertFrom-Json).repositories)
+          foreach ($r in $repos) {
+              if ($r -notmatch '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$') { throw "Invalid fleet entry: $r" }
+          }
+          "repositories=$(ConvertTo-Json -InputObject $repos -Compress)" >> $env:GITHUB_OUTPUT
+
+  sync:
+    needs: plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repository: ${{ fromJSON(needs.plan.outputs.repositories) }}
+    steps:
+      - name: Check for the sync token
+        id: token
+        env:
+          HAS_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN != '' }}
+        run: |
+          echo "present=${HAS_TOKEN}" >> "$GITHUB_OUTPUT"
+          if [ "${HAS_TOKEN}" != "true" ]; then
+            echo "::warning::AGENT_GOVERNANCE_SYNC_TOKEN is not set; skipping downstream sync."
+          fi
+
+      - name: Checkout hub (full history, so the pinned commit is known to be pushed)
+        if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: hub
+          persist-credentials: false
+
+      - name: Checkout downstream repository
+        if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ matrix.repository }}
+          token: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
+          fetch-depth: 0
+          path: downstream
+
+      - name: Sync and open or update the pull request
+        if: steps.token.outputs.present == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
+          GH_REPO: ${{ matrix.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git -C downstream config user.name 'agent-governance-sync'
+          git -C downstream config user.email 'agent-governance-sync@users.noreply.github.com'
+          $result = ./hub/Invoke-DownstreamSync.ps1 -RepoPath downstream
+          Write-Host "$($env:GH_REPO): $($result.Action) $($result.Branch)"
