@@ -10,6 +10,10 @@
     Clone of the downstream repository (origin must point at it).
 .PARAMETER DryRun
     Sync and commit locally, but push nothing and open no pull request.
+.PARAMETER InstallFormatter
+    When the repository declares Prettier but it is not installed (typical in CI), install the repository's
+    own locked dependencies first (npm ci / pnpm install --frozen-lockfile, both with --ignore-scripts), so
+    sync formats governed files the way the repository's format check expects.
 .OUTPUTS
     An object with Action (opened, updated, up-to-date, would-open) and Branch.
 #>
@@ -17,11 +21,38 @@
 [OutputType([pscustomobject])]
 param(
     [Parameter(Mandatory = $true)][string]$RepoPath,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$InstallFormatter
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Sync-AgentGovernance.ps1')
+
+function Install-RepositoryFormatter {
+    param([Parameter(Mandatory = $true)][string]$Repo)
+    $manifest = Join-Path $Repo 'package.json'
+    if (-not (Test-Path -LiteralPath $manifest)) { return }
+    $pkg = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+    $declared = ($pkg.devDependencies -and $pkg.devDependencies.PSObject.Properties['prettier']) -or
+        ($pkg.dependencies -and $pkg.dependencies.PSObject.Properties['prettier'])
+    if (-not $declared -or (Test-Path (Join-Path $Repo 'node_modules' '.bin' 'prettier*'))) { return }
+
+    Push-Location $Repo
+    try {
+        # Locked versions only, and no package install scripts.
+        if ((Test-Path 'package-lock.json') -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+            & npm ci --ignore-scripts --no-audit --no-fund
+        } elseif ((Test-Path 'pnpm-lock.yaml') -and (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+            & pnpm install --frozen-lockfile --ignore-scripts
+        } else {
+            Write-Warning 'Prettier is declared but no supported lockfile/package manager is available; governed files will not be formatted.'
+            return
+        }
+        if ($LASTEXITCODE -ne 0) { Write-Warning "Installing the repository formatter failed (exit $LASTEXITCODE); governed files may not be formatted." }
+    } finally {
+        Pop-Location
+    }
+}
 
 $repo = (Resolve-Path -LiteralPath $RepoPath).Path
 $hubSha = "$(git -C $PSScriptRoot rev-parse HEAD)".Trim()
@@ -35,6 +66,7 @@ if ($LASTEXITCODE -ne 0) { throw "git fetch failed for $repo" }
 & git -C $repo checkout --quiet -B chore/agent-governance "origin/$defaultBranch"
 if ($LASTEXITCODE -ne 0) { throw "Could not branch from origin/$defaultBranch" }
 
+if ($InstallFormatter) { Install-RepositoryFormatter -Repo $repo }
 Sync-AgentGovernance -RepoPath $repo -BranchAndCommit
 
 $ahead = [int]"$(git -C $repo rev-list --count "origin/$defaultBranch..HEAD")".Trim()

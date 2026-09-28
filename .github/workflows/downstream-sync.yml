@@ -80,5 +80,5 @@ jobs:
           $ErrorActionPreference = 'Stop'
           git -C downstream config user.name 'agent-governance-sync'
           git -C downstream config user.email 'agent-governance-sync@users.noreply.github.com'
-          $result = ./hub/Invoke-DownstreamSync.ps1 -RepoPath downstream
+          $result = ./hub/Invoke-DownstreamSync.ps1 -RepoPath downstream -InstallFormatter
           Write-Host "$($env:GH_REPO): $($result.Action) $($result.Branch)"

@@ -71,6 +71,25 @@ Describe 'Invoke-DownstreamSync.ps1' {
         $GhLog | Should -Not -Exist
     }
 
+    It 'with -InstallFormatter, installs the repository''s locked formatter without install scripts' {
+        $seed = Join-Path $TestDrive ("seed-" + [guid]::NewGuid().ToString('N'))
+        git clone --quiet $Down.Bare $seed
+        git -C $seed config user.email 'seed@example.invalid'
+        git -C $seed config user.name 'Seed'
+        Add-FixtureCommit -RepoPath $seed -Files @{
+            'package.json'      = '{ "name": "fixture", "devDependencies": { "prettier": "3.9.8" } }'
+            'package-lock.json' = '{ "lockfileVersion": 3 }'
+            '.gitignore'        = "node_modules/`n"
+        }
+        git -C $seed push --quiet origin main
+        $npmLog = Join-Path $TestDrive ("npm-" + [guid]::NewGuid().ToString('N') + '.log')
+        New-CommandShim -Directory $ShimDir -Name 'npm' -MarkerPath $npmLog
+
+        & $SyncScript -RepoPath $Down.Clone -InstallFormatter -DryRun 6>$null 3>$null | Out-Null
+
+        (Get-Content $npmLog -Raw) | Should -Match '^ci --ignore-scripts'
+    }
+
     It 'branches from the latest default branch, ignoring a stale local chore/agent-governance' {
         git -C $Down.Clone checkout --quiet -b chore/agent-governance
         Add-FixtureCommit -RepoPath $Down.Clone -Files @{ 'stale.txt' = "stale`n" }
@@ -99,6 +118,7 @@ Describe 'Downstream sync workflow and fleet list' {
         $Workflow | Should -Match '(?m)^\s+workflow_dispatch:'
         $Workflow | Should -Not -Match '(?m)^\s+(pull_request|pull_request_target|push):'
         $Workflow | Should -Match "github\.ref == 'refs/heads/main'"
+        $Workflow | Should -Match 'Invoke-DownstreamSync\.ps1 -RepoPath downstream -InstallFormatter'
     }
 
     It 'skips with a warning when the sync token is absent' {
