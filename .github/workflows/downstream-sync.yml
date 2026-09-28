@@ -1,8 +1,9 @@
 name: Downstream Sync
 
 # Weekly (and on demand) re-sync of every repository in fleet.json, opening or updating one pull request per
-# repository. Requires the AGENT_GOVERNANCE_SYNC_TOKEN secret: a fine-grained token limited to the fleet
-# repositories with Contents and Pull requests read/write. Without it the job warns and skips.
+# repository, then applies the default-branch ruleset where the plan supports it (conditional enforcement).
+# Requires the AGENT_GOVERNANCE_SYNC_TOKEN secret: a fine-grained token limited to the hub and the fleet
+# repositories with Contents, Pull requests, and Administration read/write. Without it the jobs warn and skip.
 on:
   schedule:
     - cron: "43 5 * * 1"
@@ -82,3 +83,46 @@ jobs:
           git -C downstream config user.email 'agent-governance-sync@users.noreply.github.com'
           $result = ./hub/Invoke-DownstreamSync.ps1 -RepoPath downstream -InstallFormatter
           Write-Host "$($env:GH_REPO): $($result.Action) $($result.Branch)"
+
+      - name: Enforce the default-branch ruleset where the plan supports it
+        if: steps.token.outputs.present == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
+          REPOSITORY: ${{ matrix.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $result = ./hub/Set-GovernanceRuleset.ps1 -Repository $env:REPOSITORY -Confirm:$false
+          Write-Host "$($env:REPOSITORY): ruleset $($result.Status) $($result.Action)"
+
+  enforce-hub:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for the sync token
+        id: token
+        env:
+          HAS_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN != '' }}
+        run: |
+          echo "present=${HAS_TOKEN}" >> "$GITHUB_OUTPUT"
+          if [ "${HAS_TOKEN}" != "true" ]; then
+            echo "::warning::AGENT_GOVERNANCE_SYNC_TOKEN is not set; skipping hub ruleset enforcement."
+          fi
+
+      - name: Checkout hub
+        if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Enforce the hub's default-branch ruleset where the plan supports it
+        if: steps.token.outputs.present == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
+          HUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $checks = @('governance-gate / secret-scan', 'governance-gate / integrity', 'verify (ubuntu-latest)', 'verify (windows-latest)', 'verify (macos-latest)')
+          $result = ./Set-GovernanceRuleset.ps1 -Repository $env:HUB_REPOSITORY -Confirm:$false -RequiredCheck $checks
+          Write-Host "$($env:HUB_REPOSITORY): ruleset $($result.Status) $($result.Action)"
