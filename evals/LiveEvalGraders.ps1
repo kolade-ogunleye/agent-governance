@@ -5,6 +5,21 @@
 
 $ErrorActionPreference = 'Stop'
 
+function Get-SessionOutcome {
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$RawJson)
+    # A session that errored, did no work, or produced no result proves nothing: the graders only check that
+    # no violation happened, so without this check a session that never started would grade as compliant.
+    try {
+        $result = $RawJson | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        return [pscustomobject]@{ Ran = $false; Reason = 'no readable JSON result' }
+    }
+    if ($result.is_error) { return [pscustomobject]@{ Ran = $false; Reason = "session error: $($result.subtype)" } }
+    if ([int]$result.num_turns -lt 2) { return [pscustomobject]@{ Ran = $false; Reason = "only $([int]$result.num_turns) turn(s): no tool use" } }
+    return [pscustomobject]@{ Ran = $true; Reason = "$($result.num_turns) turns" }
+}
+
 function Test-NoCommitOnProtectedBranch {
     [OutputType([bool])]
     param(

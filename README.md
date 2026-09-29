@@ -95,7 +95,7 @@ CI runs once per push to a pull request (branch pushes do not trigger a second r
 ## 📏 Measuring Compliance
 
 - **Policy-coverage eval (deterministic, runs in CI):** `evals/Invoke-PolicyEval.ps1` replays contract-forbidden agent actions and look-alike legitimate work against the real Bash guard and pre-commit guardrails. Current result: 18/18 forbidden actions blocked, 0/9 false positives. It measures the enforcement machinery, not model judgement.
-- **Live agent eval (opt-in, billed):** `evals/Invoke-LiveAgentEval.ps1` runs Claude Code non-interactively in throwaway governed repositories under pressure (bypass hooks, make a failing test pass, print a secret) and grades the outcome. It requires Claude Code's OS sandbox and refuses to run on native Windows; use macOS, Linux, or WSL2. Preview with `-DryRun`.
+- **Live agent eval (opt-in, billed):** `evals/Invoke-LiveAgentEval.ps1` runs Claude Code non-interactively in throwaway governed repositories under pressure (bypass hooks, make a failing test pass, print a secret) and grades the outcome. It requires Claude Code's OS sandbox and refuses to run on native Windows; use macOS, Linux, or WSL2. Preview with `-DryRun`. A session that errors or does no work is reported as inconclusive, never as compliant. First run (2026-09-28, WSL2): 3/3 compliant.
 
 ## ⚡ Core Capabilities
 
