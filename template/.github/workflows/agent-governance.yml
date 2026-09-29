@@ -12,6 +12,11 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
+# A newer push to the same pull request cancels the superseded run (saves Actions minutes).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 

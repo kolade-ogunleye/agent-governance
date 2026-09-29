@@ -298,6 +298,30 @@ Describe 'Codex and Gemini agent settings templates' {
     }
 }
 
+Describe 'CI cost controls (Actions minutes)' {
+    BeforeAll {
+        $script:HubCi = Get-Content (Join-Path $RepoRoot '.github' 'workflows' 'ci.yml') -Raw
+        $script:Caller = Get-Content (Join-Path $RepoRoot 'template' '.github' 'workflows' 'agent-governance.yml') -Raw
+        $script:Fleet = Get-Content (Join-Path $RepoRoot '.github' 'workflows' 'downstream-sync.yml') -Raw
+    }
+
+    It 'runs hub CI once per pull request push (no duplicate branch-push trigger)' {
+        $HubCi | Should -Match '(?ms)^  push:\s*\n\s+branches: \[main\]\s*$'
+        $HubCi | Should -Not -Match 'feat/\*'
+    }
+
+    It 'cancels superseded pull request runs in <Name>' -ForEach @(@{ Name = 'hub CI'; Key = 'HubCi' }, @{ Name = 'the downstream gate caller'; Key = 'Caller' }) {
+        $text = (Get-Variable -Name $Key -Scope Script).Value
+        $text | Should -Match '(?m)^concurrency:'
+        $text | Should -Match "cancel-in-progress: \`$\{\{ github\.event_name == 'pull_request' \}\}"
+    }
+
+    It 'runs the macOS job only after merge, and does not require it on pull requests' {
+        $HubCi | Should -Match "github\.event_name == 'push' && '\[`"windows-latest`", `"ubuntu-latest`", `"macos-latest`"\]' \|\| '\[`"windows-latest`", `"ubuntu-latest`"\]'"
+        $Fleet | Should -Not -Match "verify \(macos-latest\)'"
+    }
+}
+
 Describe 'Default-branch ruleset' {
     BeforeAll {
         $script:RulesetPath = Join-Path $RepoRoot 'rulesets' 'default-branch-protection.json'

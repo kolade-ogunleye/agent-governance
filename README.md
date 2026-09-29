@@ -47,7 +47,7 @@ The engine is loaded into your PowerShell profile (`$PROFILE`) and provides rich
 ### CLI Syntax:
 
 ```powershell
-Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
+Sync-AgentGovernance [[-Action] <sync|audit|status|hooks|help>]
                      [-RepoPath|-r <path>]
                      [-All|-a]
                      [-FleetRoot <path>]
@@ -64,6 +64,7 @@ Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
 | `Sync-AgentGovernance`             | `Sync-AgentGovernance sync`             | Reconciles governance in current directory.                           |
 | `Sync-AgentGovernance -h`          | `Sync-AgentGovernance help`             | Displays the interactive CLI reference manual.                        |
 | `Sync-AgentGovernance status`      | —                                       | Inspects Central Hub health, active rules, and guardrails.            |
+| `Sync-AgentGovernance hooks -r .`  | —                                       | Installs only the local git gate (safe with uncommitted work).        |
 | `Sync-AgentGovernance audit -a`    | `Sync-AgentGovernance -All -AuditOnly`  | Performs a read-only audit across all repositories.                   |
 | `Sync-AgentGovernance -r <dir> -c` | `Sync-AgentGovernance -BranchAndCommit` | Syncs target repo, branches to `chore/agent-governance`, and commits. |
 | `Sync-AgentGovernance -a -c`       | —                                       | Fleet-wide safe sync and automated commit across all clean repos.     |
@@ -86,6 +87,10 @@ Ordered from hardest to easiest to bypass:
 ## 🔁 Keeping the Fleet in Sync
 
 `fleet.json` lists the governed repositories. `.github/workflows/downstream-sync.yml` runs weekly (and on demand) from `main`: for each repository it runs `Invoke-DownstreamSync.ps1`, which branches from the latest default branch, re-syncs, and opens or updates a `chore/agent-governance-sync-<hub-sha>` pull request. It then applies the default-branch ruleset to each repository and to the hub where the plan supports it. It needs an `AGENT_GOVERNANCE_SYNC_TOKEN` secret in the hub: a fine-grained token limited to the hub and the fleet repositories, with Contents, Pull requests, and Administration read/write. Without it the jobs warn and skip. To enrol a repository: add it to `fleet.json`, add it to the token's repository list, and set its `AGENT_GOVERNANCE_HUB_TOKEN` secret. CODEOWNERS is intentionally not shipped for solo, private repositories (see `docs/adr/0002-no-codeowners-for-solo-private-repos.md`).
+
+## 💸 Actions Minutes
+
+CI runs once per push to a pull request (branch pushes do not trigger a second run), a newer push cancels the superseded run, and the macOS job (about 10x the per-minute cost of Linux) runs only after merge to `main`. Minutes are spent per push, not per commit: batch commits locally and push once.
 
 ## 📏 Measuring Compliance
 
