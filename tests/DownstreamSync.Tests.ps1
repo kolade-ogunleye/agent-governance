@@ -102,6 +102,75 @@ Describe 'Invoke-DownstreamSync.ps1' {
     }
 }
 
+Describe 'Invoke-DownstreamSync.ps1 pull request nudges' {
+    BeforeAll {
+        # A scripted gh: `pr create` prints the new URL, `pr list` without --head reports older open sync
+        # pull requests, and `label create` fails when GH_SHIM_LABEL_FAILS is set.
+        $script:NudgeShimDir = Join-Path $TestDrive 'gh-nudge-shim'
+        New-Item -ItemType Directory -Path $NudgeShimDir | Out-Null
+        $impl = @'
+$ErrorActionPreference = 'Stop'
+Add-Content -LiteralPath $env:GH_SHIM_LOG -Value ($args -join ' ')
+if ($args[0] -eq 'label' -and $env:GH_SHIM_LABEL_FAILS) { exit 1 }
+if ($args[0] -eq 'pr' -and $args[1] -eq 'create') { Write-Output 'https://github.com/octo/example/pull/12'; exit 0 }
+if ($args[0] -eq 'pr' -and $args[1] -eq 'list' -and $args -notcontains '--head') {
+    Write-Output '[{"number":7,"headRefName":"chore/agent-governance-sync-0000000"},{"number":9,"headRefName":"feat/unrelated"}]'
+    exit 0
+}
+exit 0
+'@
+        [System.IO.File]::WriteAllText((Join-Path $NudgeShimDir 'gh-impl.ps1'), $impl)
+        if ($IsWindows) {
+            [System.IO.File]::WriteAllText((Join-Path $NudgeShimDir 'gh.ps1'), "& '$((Join-Path $NudgeShimDir 'gh-impl.ps1'))' @args`nexit `$LASTEXITCODE`n")
+        } else {
+            $sh = Join-Path $NudgeShimDir 'gh'
+            [System.IO.File]::WriteAllText($sh, "#!/bin/sh`nexec pwsh -NoProfile -File '$((Join-Path $NudgeShimDir 'gh-impl.ps1'))' `"`$@`"`n")
+            chmod +x $sh
+        }
+    }
+
+    BeforeEach {
+        $script:Down = New-DownstreamClone
+        $script:GhLog = Join-Path $TestDrive ("gh-" + [guid]::NewGuid().ToString('N') + '.log')
+        $script:Saved = @{ PATH = $env:PATH; GH_SHIM_LOG = $env:GH_SHIM_LOG; GH_SHIM_LABEL_FAILS = $env:GH_SHIM_LABEL_FAILS }
+        $env:PATH = $NudgeShimDir + [System.IO.Path]::PathSeparator + $env:PATH
+        $env:GH_SHIM_LOG = $GhLog
+    }
+
+    AfterEach {
+        foreach ($k in $Saved.Keys) { [Environment]::SetEnvironmentVariable($k, $Saved[$k]) }
+    }
+
+    It 'labels the pull request and assigns it to the token owner' {
+        & $SyncScript -RepoPath $Down.Clone 6>$null 3>$null | Out-Null
+
+        $log = Get-Content $GhLog -Raw
+        $log | Should -Match 'label create agent-governance --force'
+        $log | Should -Match '(?s)pr create .*--assignee @me --label agent-governance'
+    }
+
+    It 'closes only older sync pull requests, pointing them at the new one' {
+        $result = & $SyncScript -RepoPath $Down.Clone 6>$null 3>$null
+
+        $result.Superseded | Should -Be @(7)
+        $log = Get-Content $GhLog -Raw
+        $log | Should -Match 'pr list --state open --limit 100 --json number,headRefName'
+        $log | Should -Match 'pr close 7 --delete-branch --comment Superseded by #12'
+        $log | Should -Not -Match 'pr close 9'
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It 'still opens the pull request, unlabelled, when the label cannot be created' {
+        $env:GH_SHIM_LABEL_FAILS = '1'
+
+        $result = & $SyncScript -RepoPath $Down.Clone -WarningVariable warnings 6>$null 3>$null
+
+        $result.Action | Should -Be 'opened'
+        ($warnings -join "`n") | Should -Match 'without it'
+        Get-Content $GhLog -Raw | Should -Not -Match '--label'
+    }
+}
+
 Describe 'Downstream sync workflow and fleet list' {
     BeforeAll {
         $script:Workflow = Get-Content (Join-Path $HubRoot '.github' 'workflows' 'downstream-sync.yml') -Raw

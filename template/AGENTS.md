@@ -14,7 +14,8 @@
      - Test-only additions / fixes: `git checkout -b test/<task-slug>`
 2. **Synchronized Conventional Commits:** All commit messages MUST strictly reflect the task type using Conventional Commits 1.0.0 format: `<type>(<optional-scope>): <description>`.
 3. **Tree Cleanliness:** At task start you MUST run `git status --porcelain`. If it shows uncommitted changes you did not make, you MUST HALT and ask the user whether to stash or commit them.
-4. **Guardrail Check:** Ensure the git `pre-commit` hook contains the `# >>> agent-governance` block. If missing, run `Sync-AgentGovernance`. You MUST NOT run `lefthook install`, which replaces the fail-closed governance gate.
+4. **Guardrail Check:** Ensure the git `pre-commit` hook contains the `# >>> agent-governance` block. If missing, run `pwsh -NoProfile -Command ". ~/.agent-governance/Sync-AgentGovernance.ps1; Sync-AgentGovernance hooks -RepoPath ."` (installs only the gate; safe with uncommitted work). You MUST NOT run `lefthook install`, which replaces the fail-closed governance gate.
+5. **Pending Governance Sync:** If `gh` is available, run `gh pr list --label agent-governance --state open`. If a sync pull request is open, tell the user at session start; it SHOULD be reviewed and merged within 30 days (CI warns at 30, fails at 90). You MUST NOT merge it yourself.
 
 ## 2. ADVERSARIAL RED-TEAM INVERSION (BEFORE ANY CODE EDIT)
 

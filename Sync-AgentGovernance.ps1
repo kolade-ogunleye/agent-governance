@@ -44,7 +44,7 @@ function Sync-AgentGovernance {
     [CmdletBinding(DefaultParameterSetName = 'Standard', SupportsShouldProcess = $true)]
     param(
         [Parameter(Position = 0)]
-        [ValidateSet('sync', 'audit', 'status', 'help', '')]
+        [ValidateSet('sync', 'audit', 'status', 'hooks', 'help', '')]
         [string]$Action = 'sync',
 
         [Parameter()]
@@ -294,7 +294,7 @@ function Sync-AgentGovernance {
 ══════════════════════════════════════════════════════════════════════════════
 
 SYNOPSIS:
-    Sync-AgentGovernance [[-Action] <sync|audit|status|help>]
+    Sync-AgentGovernance [[-Action] <sync|audit|status|hooks|help>]
                          [-RepoPath|-r <path>]
                          [-All|-a]
                          [-AuditOnly|-m]
@@ -304,6 +304,7 @@ SYNOPSIS:
 SUBCOMMANDS:
     sync                 Idempotently synchronizes governance, hooks, and rules. (Default)
     audit                Audits repository governance status without writing any files.
+    hooks                Installs only the local git gate (safe with uncommitted work).
     status               Displays Central Hub health, active templates, and version info.
     help                 Displays this comprehensive manual.
 
@@ -540,6 +541,7 @@ EXAMPLES:
         param([string]$targetDir)
 
         $localHooksPath = (git -C $targetDir --no-pager config --local core.hooksPath)
+        $trackedHookFiles = @(git -C $targetDir ls-files -- .githooks/pre-commit .githooks/pre-push 2>$null)
         $hookDir = $null
         $isCustomHookPath = $false
 
@@ -557,6 +559,13 @@ EXAMPLES:
             } else {
                 $hookDir = $candidate
             }
+        } elseif ($trackedHookFiles.Count -gt 0) {
+            # core.hooksPath is local config and is not cloned: a fresh clone of a repository that versions its
+            # hooks in .githooks still has to update those tracked files (and use them from now on).
+            $isCustomHookPath = $true
+            git -C $targetDir config --local core.hooksPath .githooks
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to set core.hooksPath to the tracked .githooks.' }
+            $hookDir = Join-Path (Resolve-Path $targetDir).Path '.githooks'
         } else {
             # Worktree-safe: in a linked worktree .git is a file and hooks live in the common git dir.
             $hookDir = "$(git -C $targetDir rev-parse --path-format=absolute --git-path hooks)".Trim()
@@ -1193,6 +1202,31 @@ fi
         }
     }
 
+    # 'hooks': install only the local git gate. Hooks are not versioned, so a merged governance PR never
+    # installs them; this touches nothing git tracks and is therefore safe on a tree with work in progress.
+    function Install-GovernanceHook {
+        param([Parameter(Mandatory = $true)][string]$targetDir)
+        $gitDir = "$(git -C $targetDir rev-parse --git-dir 2>$null)".Trim()
+        if (-not $gitDir) {
+            Write-Warning "Skipped: $targetDir is not a git repository."
+            return
+        }
+        # Versioned hooks (e.g. .githooks) are part of the repository: changing them here would leave an
+        # uncommitted edit, possibly on main. They are updated through the hub's sync pull requests instead.
+        $root = "$(git -C $targetDir rev-parse --show-toplevel)".Trim()
+        $configured = "$(git -C $root config --local core.hooksPath 2>$null)".Trim()
+        $hookRel = if ($configured) { [System.IO.Path]::GetRelativePath($root, [System.IO.Path]::GetFullPath($configured, $root)) } else { '.githooks' }
+        $trackedHooks = if ($hookRel -notmatch '^\.\.([\\/]|$)' -and -not [System.IO.Path]::IsPathRooted($hookRel)) {
+            @(git -C $root ls-files -- "$hookRel/pre-commit" "$hookRel/pre-push" 2>$null)
+        } else { @() }
+        if ($trackedHooks.Count -gt 0) {
+            Write-Warning "Skipped: $root keeps its hooks in the tracked '$hookRel' directory, so updating them is a versioned change. Merge the hub's sync pull request (or run a full Sync-AgentGovernance on a branch) to update them."
+            return
+        }
+        if (-not $PSCmdlet.ShouldProcess($targetDir, "Install governance git hooks")) { return }
+        Sync-GitHook -targetDir $root
+    }
+
     if ($All) {
         if (-not $FleetRoot) {
             $FleetRoot = if ($env:AGENT_GOVERNANCE_FLEET_ROOT) { $env:AGENT_GOVERNANCE_FLEET_ROOT } else { Split-Path -Parent $PSScriptRoot }
@@ -1202,8 +1236,10 @@ fi
             Where-Object { (Test-Path (Join-Path $_.FullName ".git")) -and $_.FullName -ne $hubRepoRoot }
         Write-Host "🚀 Running Sync-AgentGovernance across $($repos.Count) repositories..." -ForegroundColor Magenta
         foreach ($repo in $repos) {
-            Sync-SingleRepo -targetDir $repo.FullName
+            if ($Action -eq 'hooks') { Install-GovernanceHook -targetDir $repo.FullName } else { Sync-SingleRepo -targetDir $repo.FullName }
         }
+    } elseif ($Action -eq 'hooks') {
+        Install-GovernanceHook -targetDir $RepoPath
     } else {
         Sync-SingleRepo -targetDir $RepoPath
     }

@@ -1,10 +1,17 @@
 name: Governance Engine CI
 
+# Pull requests run CI once per push (branch pushes no longer trigger a second, duplicate run);
+# merges to main run the full matrix including macOS, which bills about 10x Linux per minute.
 on:
   push:
-    branches: [main, "feat/*", "fix/*", "patch/*", "hotfix/*", "refactor/*", "chore/*", "test/*"]
+    branches: [main]
   pull_request:
     branches: [main]
+
+# A newer push to the same pull request cancels the superseded run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -22,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(github.event_name == 'push' && '["windows-latest", "ubuntu-latest", "macos-latest"]' || '["windows-latest", "ubuntu-latest"]') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

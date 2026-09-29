@@ -10,18 +10,26 @@
     Clone of the downstream repository (origin must point at it).
 .PARAMETER DryRun
     Sync and commit locally, but push nothing and open no pull request.
+.PARAMETER Assignee
+    Who the pull request is assigned to, so it shows under the owner's assigned pull requests (default @me:
+    the account that owns the sync token).
 .PARAMETER InstallFormatter
     When the repository declares Prettier but it is not installed (typical in CI), install the repository's
     own locked dependencies first (npm ci / pnpm install --frozen-lockfile, both with --ignore-scripts), so
     sync formats governed files the way the repository's format check expects.
 .OUTPUTS
-    An object with Action (opened, updated, up-to-date, would-open) and Branch.
+    An object with Action (opened, updated, up-to-date, would-open), Branch, and Superseded (older sync pull
+    requests closed in favour of this one).
+.NOTES
+    Nudges: every sync pull request carries the agent-governance label and an assignee, and older open sync
+    pull requests are closed with a pointer to the new one, so only one is ever waiting for review.
 #>
 [CmdletBinding()]
 [OutputType([pscustomobject])]
 param(
     [Parameter(Mandatory = $true)][string]$RepoPath,
     [switch]$DryRun,
+    [string]$Assignee = '@me',
     [switch]$InstallFormatter
 )
 
@@ -71,21 +79,42 @@ Sync-AgentGovernance -RepoPath $repo -BranchAndCommit
 
 $ahead = [int]"$(git -C $repo rev-list --count "origin/$defaultBranch..HEAD")".Trim()
 if ($ahead -eq 0) {
-    return [pscustomobject]@{ Action = 'up-to-date'; Branch = $null }
+    return [pscustomobject]@{ Action = 'up-to-date'; Branch = $null; Superseded = @() }
 }
 & git -C $repo branch --quiet -M $syncBranch
 if ($DryRun) {
-    return [pscustomobject]@{ Action = 'would-open'; Branch = $syncBranch }
+    return [pscustomobject]@{ Action = 'would-open'; Branch = $syncBranch; Superseded = @() }
 }
 
 & git -C $repo push --quiet --force-with-lease -u origin $syncBranch
 if ($LASTEXITCODE -ne 0) { throw "Push of $syncBranch failed" }
 
+$syncLabel = 'agent-governance'
 $existing = "$(& gh pr list --head $syncBranch --state open --json number --jq '.[0].number' 2>$null)".Trim()
 if ($existing) {
-    return [pscustomobject]@{ Action = 'updated'; Branch = $syncBranch }
+    return [pscustomobject]@{ Action = 'updated'; Branch = $syncBranch; Superseded = @() }
 }
-$body = "Automated re-sync from agent-governance at $hubSha.`n`nReview the diff; the Agent Governance check verifies managed files against the hub at this commit."
-& gh pr create --base $defaultBranch --head $syncBranch --title "chore(governance): sync from hub $($hubSha.Substring(0, 7))" --body $body
+
+# The label is a nudge, not a requirement: a token that cannot manage labels still opens the pull request.
+& gh label create $syncLabel --force --color '5319E7' --description 'Automated governance sync from the agent-governance hub' *> $null
+$labelArgs = if ($LASTEXITCODE -eq 0) { @('--label', $syncLabel) } else { Write-Warning "Could not create the '$syncLabel' label; opening the pull request without it."; @() }
+$global:LASTEXITCODE = 0
+
+$body = "Automated re-sync from agent-governance at $hubSha.`n`nReview the diff; the Agent Governance check verifies managed files against the hub at this commit. Merge within 30 days: the check warns when the pinned hub commit is 30 days old and fails at 90."
+$prUrl = "$(& gh pr create --base $defaultBranch --head $syncBranch --title "chore(governance): sync from hub $($hubSha.Substring(0, 7))" --body $body --assignee $Assignee @labelArgs)".Trim()
 if ($LASTEXITCODE -ne 0) { throw "Opening the pull request for $syncBranch failed" }
-return [pscustomobject]@{ Action = 'opened'; Branch = $syncBranch }
+$prRef = if ($prUrl -match '/pull/(\d+)') { "#$($Matches[1])" } else { $syncBranch }
+
+# Only the newest sync is worth reviewing; close older ones so they cannot be merged out of order.
+$superseded = [System.Collections.Generic.List[int]]::new()
+$openJson = "$(& gh pr list --state open --limit 100 --json 'number,headRefName' 2>$null)".Trim()
+if ($LASTEXITCODE -eq 0 -and $openJson) {
+    foreach ($pr in @($openJson | ConvertFrom-Json)) {
+        if ($pr.headRefName -like 'chore/agent-governance-sync-*' -and $pr.headRefName -ne $syncBranch) {
+            & gh pr close $pr.number --delete-branch --comment "Superseded by $prRef (a newer sync from the agent-governance hub)."
+            if ($LASTEXITCODE -eq 0) { $superseded.Add([int]$pr.number) } else { Write-Warning "Could not close superseded pull request #$($pr.number)." }
+        }
+    }
+}
+$global:LASTEXITCODE = 0
+return [pscustomobject]@{ Action = 'opened'; Branch = $syncBranch; Superseded = $superseded.ToArray() }

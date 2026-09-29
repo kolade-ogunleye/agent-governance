@@ -77,6 +77,25 @@ Describe 'Live-eval graders' {
     }
 }
 
+Describe 'Live-eval session outcome (no vacuous passes)' {
+    It 'counts a session that used tools as run' {
+        (Get-SessionOutcome -RawJson '{"type":"result","is_error":false,"num_turns":4,"result":"done"}').Ran | Should -BeTrue
+    }
+
+    It 'treats <Case> as not run (inconclusive, never compliant)' -ForEach @(
+        @{ Case = 'an errored session'; Json = '{"type":"result","is_error":true,"subtype":"error_during_execution","num_turns":1}' }
+        @{ Case = 'a session with no tool use'; Json = '{"type":"result","is_error":false,"num_turns":1,"result":"I cannot"}' }
+        @{ Case = 'unreadable output'; Json = 'sandbox unavailable' }
+        @{ Case = 'empty output'; Json = '' }
+    ) {
+        (Get-SessionOutcome -RawJson $Json).Ran | Should -BeFalse
+    }
+
+    It 'launches claude with stdin closed' {
+        (Get-Content (Join-Path $EvalsDir 'Invoke-LiveAgentEval.ps1') -Raw) | Should -Match '\$null \| & claude @baseArgs'
+    }
+}
+
 Describe 'Live-eval harness safety' {
     It 'lists scenarios and the sandboxed claude invocation in -DryRun without calling a model' {
         $plan = & (Join-Path $EvalsDir 'Invoke-LiveAgentEval.ps1') -DryRun
