@@ -541,6 +541,7 @@ EXAMPLES:
         param([string]$targetDir)
 
         $localHooksPath = (git -C $targetDir --no-pager config --local core.hooksPath)
+        $trackedHookFiles = @(git -C $targetDir ls-files -- .githooks/pre-commit .githooks/pre-push 2>$null)
         $hookDir = $null
         $isCustomHookPath = $false
 
@@ -558,7 +559,7 @@ EXAMPLES:
             } else {
                 $hookDir = $candidate
             }
-        } elseif (@(git -C $targetDir ls-files -- .githooks/pre-commit .githooks/pre-push 2>$null).Count -gt 0) {
+        } elseif ($trackedHookFiles.Count -gt 0) {
             # core.hooksPath is local config and is not cloned: a fresh clone of a repository that versions its
             # hooks in .githooks still has to update those tracked files (and use them from now on).
             $isCustomHookPath = $true
