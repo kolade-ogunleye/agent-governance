@@ -83,6 +83,8 @@ jobs:
           git -C downstream config user.email 'agent-governance-sync@users.noreply.github.com'
           $result = ./hub/Invoke-DownstreamSync.ps1 -RepoPath downstream -InstallFormatter
           Write-Host "$($env:GH_REPO): $($result.Action) $($result.Branch)"
+          $closed = if ($result.Superseded) { " (closed superseded: #$($result.Superseded -join ', #'))" } else { '' }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- **$($env:GH_REPO)**: $($result.Action) $($result.Branch)$closed"
 
       - name: Enforce the default-branch ruleset where the plan supports it
         if: steps.token.outputs.present == 'true'
