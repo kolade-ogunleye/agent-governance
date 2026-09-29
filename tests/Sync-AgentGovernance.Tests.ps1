@@ -100,6 +100,54 @@ Describe 'Sync-AgentGovernance' {
         git -C $Repo log -1 --format=%s | Should -Be 'chore(governance): install unified agent contract and deterministic guardrails'
     }
 
+    Context 'tracked hook directories in fresh clones' {
+        It 'updates tracked .githooks when the clone has no local core.hooksPath' {
+            $legacy = "#!/bin/sh`necho team-check`n# Chained by Agent Governance (Lefthook + Gitleaks)`nif command -v lefthook >/dev/null 2>&1; then`n  lefthook run pre-commit || exit 1`nelse`n  echo missing >&2`n  if [ -n `"`$AGENT_ROLE`" ]; then`n    exit 1`n  fi`nfi`nexit 0`n"
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.githooks/pre-commit' = $legacy }
+
+            Invoke-QuietSync -RepoPath $Repo -BranchAndCommit
+
+            $hook = Get-Content (Join-Path $Repo '.githooks/pre-commit') -Raw
+            $hook | Should -Match '# >>> agent-governance'
+            $hook | Should -Match 'echo team-check'
+            @(git -C $Repo diff --name-only HEAD~1 HEAD) | Should -Contain '.githooks/pre-commit'
+        }
+    }
+
+    Context 'hooks action' {
+        It 'installs only the git gate, leaving staged work and tracked files untouched' {
+            # A repository synced long ago: Lefthook's own hook, and work in progress staged.
+            [System.IO.File]::WriteAllText((Join-Path $Repo '.git/hooks/pre-commit'), "#!/bin/sh`ncall_lefthook run `"pre-commit`" `"`$@`"`n")
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'wip.txt'), "work in progress`n")
+            git -C $Repo add wip.txt
+
+            Sync-AgentGovernance hooks -RepoPath $Repo 6>$null 3>$null
+
+            (Get-Content (Join-Path $Repo '.git/hooks/pre-commit') -Raw) | Should -Match '# >>> agent-governance'
+            @(git -C $Repo diff --cached --name-only) | Should -Be @('wip.txt')
+            Join-Path $Repo 'AGENTS.md' | Should -Not -Exist
+        }
+
+        It 'refuses to edit hooks that git tracks, and says how to update them' {
+            Add-FixtureCommit -RepoPath $Repo -Files @{ '.githooks/pre-commit' = "#!/bin/sh`necho team-check`nexit 0`n" }
+            git -C $Repo config --local core.hooksPath .githooks
+
+            $warnings = Sync-AgentGovernance hooks -RepoPath $Repo 6>$null 3>&1 | ForEach-Object { "$_" }
+
+            ($warnings -join "`n") | Should -Match 'tracked'
+            git -C $Repo status --porcelain | Should -BeNullOrEmpty
+        }
+
+        It 'warns and does nothing outside a git repository' {
+            $plain = Join-Path $TestDrive ("plain-" + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $plain | Out-Null
+
+            $warnings = Sync-AgentGovernance hooks -RepoPath $plain 6>$null 3>&1 | ForEach-Object { "$_" }
+
+            ($warnings -join "`n") | Should -Match 'not a git repository'
+        }
+    }
+
     Context 'downstream formatting' {
         It 'warns when Prettier is configured but not installed' {
             Add-FixtureCommit -RepoPath $Repo -Files @{
