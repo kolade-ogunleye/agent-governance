@@ -364,3 +364,170 @@ Describe 'Set-GovernanceRuleset.ps1' {
         { & (Join-Path $RepoRoot 'Set-GovernanceRuleset.ps1') -Repository 'not a repo' -WhatIf } | Should -Throw
     }
 }
+
+Describe 'agent-bash-guard.ps1 bypass variants (red-team 2026-10-01)' {
+    It 'blocks: <Command>' -ForEach @(
+        @{ Command = "git commit '--no-verify' -m wip" }
+        @{ Command = 'git commit "--no-verify" -m wip' }
+        @{ Command = 'git commit --no-verif -m wip' }
+        @{ Command = 'sh -c "git commit --no-verify -m wip"' }
+        @{ Command = "bash -lc 'cd app && git commit --no-verify'" }
+        @{ Command = 'pwsh -Command "git commit --no-verify -m wip"' }
+        @{ Command = 'eval "git commit --no-verify"' }
+        @{ Command = 'F=--no-verify; git commit $F -m wip' }
+        @{ Command = "`$flag = '--no-verify'; git commit `$flag -m wip" }
+        @{ Command = "git -c 'core.hooksPath=/dev/null' commit -m wip" }
+        @{ Command = 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m wip' }
+        @{ Command = "GIT_CONFIG_PARAMETERS='core.hooksPath=/dev/null' git commit -m wip" }
+        @{ Command = 'git config --unset core.hooksPath' }
+        @{ Command = 'git config unset core.hooksPath' }
+        @{ Command = 'git push origin HEAD:refs/heads/main' }
+        @{ Command = "git push origin 'main'" }
+        @{ Command = 'git push origin +main' }
+        @{ Command = 'git push --force-with-lease origin HEAD:master' }
+        @{ Command = 'printf "#!/bin/sh\nexit 0" > .git/hooks/pre-commit; git commit -m wip' }
+        @{ Command = 'echo exit 0 >> .githooks/pre-push' }
+        @{ Command = 'rm .git/hooks/pre-commit && git commit -m wip' }
+        @{ Command = 'chmod -x .git/hooks/pre-commit' }
+        @{ Command = 'cp /tmp/empty .husky/pre-commit' }
+        @{ Command = "Set-Content .git\hooks\pre-commit 'exit 0'" }
+        @{ Command = 'Remove-Item .git/hooks/pre-push' }
+        @{ Command = 'Set-Item env:LEFTHOOK 0; git commit -m wip' }
+        @{ Command = 'export LEFTHOOK_EXCLUDE=detect-secrets; git commit -m wip' }
+    ) {
+        $result = Invoke-HookScript -ScriptPath $Guard -InputText (ConvertTo-HookPayload $Command)
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -Match 'Agent Governance'
+    }
+
+    It 'allows: <Command>' -ForEach @(
+        @{ Command = 'git commit -m fix' }
+        @{ Command = 'git commit -m "nit"' }
+        @{ Command = 'git commit -m "docs: explain core.hooksPath and GIT_CONFIG_COUNT"' }
+        @{ Command = 'git push -u origin feat/main-menu' }
+        @{ Command = 'git push origin maintenance' }
+        @{ Command = 'git push origin main-line' }
+        @{ Command = 'git log --oneline -n 5' }
+        @{ Command = 'cat .git/hooks/pre-commit' }
+        @{ Command = 'git config --get core.hooksPath' }
+        @{ Command = 'sh -c "npm test && git status"' }
+        @{ Command = 'grep -rn hooksPath docs/' }
+    ) {
+        (Invoke-HookScript -ScriptPath $Guard -InputText (ConvertTo-HookPayload $Command)).ExitCode | Should -Be 0
+    }
+
+    It 'names the accepted misses so the limits of a text check stay documented' {
+        $guard = Get-Content $Guard -Raw
+        $guard | Should -Match 'Accepted misses'
+        Join-Path $RepoRoot 'docs' 'adr' '0003-command-guard-defence-in-depth.md' | Should -Exist
+    }
+}
+
+Describe 'Claude Code settings template: native deny rules and sandbox hardening' {
+    BeforeAll {
+        $script:Settings = Get-Content (Join-Path $RepoRoot 'template' '.claude' 'settings.json') -Raw | ConvertFrom-Json
+        $script:Deny = @($Settings.permissions.deny)
+    }
+
+    It 'backs the hook with a native Bash deny rule for <Rule>' -ForEach @(
+        @{ Rule = 'Bash(*--no-verif*)' }
+        @{ Rule = 'Bash(*LEFTHOOK=*)' }
+        @{ Rule = 'Bash(*lefthook install*)' }
+        @{ Rule = 'Bash(*core.hooksPath=*)' }
+        @{ Rule = 'Bash(git config *core.hooksPath *)' }
+        @{ Rule = 'Bash(*GIT_CONFIG_COUNT=*)' }
+        @{ Rule = 'Bash(git push * main)' }
+        @{ Rule = 'Bash(git push *:main)' }
+        @{ Rule = 'Bash(git push *refs/heads/main*)' }
+        @{ Rule = 'Bash(git push * master)' }
+        @{ Rule = 'Bash(*>*.git/hooks/*)' }
+        @{ Rule = 'Bash(rm *.git/hooks/*)' }
+    ) {
+        $Deny | Should -Contain $Rule
+    }
+
+    It 'pre-allows the package registries the contract names, so sandboxed installs do not prompt' {
+        foreach ($domain in @('github.com', 'registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org', 'crates.io', 'proxy.golang.org')) {
+            $Settings.sandbox.network.allowedDomains | Should -Contain $domain
+        }
+    }
+
+    It 'denies cloud credentials to sandboxed commands (files and environment variables)' {
+        @($Settings.sandbox.credentials.files | ForEach-Object path) | Should -Contain '~/.aws/credentials'
+        @($Settings.sandbox.credentials.envVars | ForEach-Object name) | Should -Contain 'AWS_SECRET_ACCESS_KEY'
+        foreach ($entry in @($Settings.sandbox.credentials.files) + @($Settings.sandbox.credentials.envVars)) { $entry.mode | Should -Be 'deny' }
+    }
+
+    It 'keeps GH_TOKEN usable inside the sandbox (the contract asks agents to run gh pr list)' {
+        @($Settings.sandbox.credentials.envVars | ForEach-Object name) | Should -Not -Contain 'GH_TOKEN'
+        @($Settings.sandbox.credentials.envVars | ForEach-Object name) | Should -Not -Contain 'GITHUB_TOKEN'
+    }
+
+    It 'leaves the unsandboxed retry escape hatch on its prompting default (no silent lockout)' {
+        $Settings.sandbox.PSObject.Properties['allowUnsandboxedCommands'] | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Governance gate hub mode (the hub dogfoods its own lock)' {
+    BeforeAll {
+        $script:GatePath = Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml'
+        $script:Gate = Get-Content $GatePath -Raw
+        $script:LockStep = Join-Path $TestDrive 'read-lock.ps1'
+        [System.IO.File]::WriteAllText($LockStep, (Get-WorkflowStepScript -WorkflowPath $GatePath -StepName 'Read locked hub commit'))
+
+        function Invoke-LockStep {
+            param([Parameter(Mandatory = $true)][string]$Dir, [Parameter(Mandatory = $true)][string]$IsHub)
+            $outputs = Join-Path $TestDrive ("outputs-" + [guid]::NewGuid().ToString('N'))
+            $saved = @{ IS_HUB = $env:IS_HUB; GITHUB_OUTPUT = $env:GITHUB_OUTPUT }
+            $env:IS_HUB = $IsHub; $env:GITHUB_OUTPUT = $outputs
+            Push-Location $Dir
+            try {
+                $out = & pwsh -NoProfile -File $LockStep 2>&1
+                $written = if (Test-Path $outputs) { Get-Content $outputs -Raw } else { '' }
+                return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out -join "`n"); Outputs = $written }
+            } finally {
+                Pop-Location
+                $env:IS_HUB = $saved.IS_HUB; $env:GITHUB_OUTPUT = $saved.GITHUB_OUTPUT
+            }
+        }
+    }
+
+    It 'detects the hub from the job context, never from a caller-supplied input' {
+        $Gate | Should -Match 'IS_HUB: \$\{\{ github\.repository == job\.workflow_repository \}\}'
+    }
+
+    It 'fails closed when the hub itself has no lock' {
+        $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $dir | Out-Null
+        $r = Invoke-LockStep -Dir $dir -IsHub 'true'
+        $r.ExitCode | Should -Be 1
+        $r.Output | Should -Match 'must carry its own \.agent-governance\.lock'
+    }
+
+    It 'still only notices a missing lock for a downstream caller' {
+        $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $dir | Out-Null
+        $r = Invoke-LockStep -Dir $dir -IsHub 'false'
+        $r.ExitCode | Should -Be 0
+        $r.Outputs | Should -Match 'present=false'
+        $r.Outputs | Should -Match 'is_hub=false'
+    }
+
+    It 'reads the locked commit for either caller' {
+        $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $dir | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $dir '.agent-governance.lock'), ('{"version":1,"hub":{"commit":"' + ('a' * 40) + '"},"files":{}}'))
+        $r = Invoke-LockStep -Dir $dir -IsHub 'true'
+        $r.ExitCode | Should -Be 0
+        $r.Outputs | Should -Match 'present=true'
+        $r.Outputs | Should -Match 'is_hub=true'
+        $r.Outputs | Should -Match ('commit=' + ('a' * 40))
+    }
+
+    It 'skips the hub checkout, pin and freshness steps for the hub and verifies against its own template' {
+        $Gate | Should -Match "(?m)^\s+id: hub\s*\n\s+if: steps\.lock\.outputs\.present == 'true' && steps\.lock\.outputs\.is_hub != 'true'"
+        $Gate | Should -Match "Check hub pin consistency and freshness\s*\n(?:\s+#[^\n]*\n)*\s+if: [^\n]*is_hub != 'true'"
+        $Gate | Should -Match "if: steps\.lock\.outputs\.present == 'true' && steps\.lock\.outputs\.is_hub == 'true'\s*\n\s+shell: pwsh\s*\n(?:\s+#[^\n]*\n)*\s+run: \./template/scripts/guardrails/verify-governance\.ps1 -HubTemplate \./template"
+    }
+
+    It 'accepts Dependabot branches server-side, where no local hook ever runs' {
+        $Gate | Should -Match '\|dependabot\)/'
+    }
+}

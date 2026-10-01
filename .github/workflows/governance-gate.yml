@@ -93,7 +93,8 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          if [[ ! "$HEAD_REF" =~ ^(feat|fix|patch|hotfix|refactor|chore|test)/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ ]]; then
+          # dependabot/ is GitHub's own prefix for Dependabot pull requests (.github/dependabot.yml).
+          if [[ ! "$HEAD_REF" =~ ^(feat|fix|patch|hotfix|refactor|chore|test|dependabot)/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ ]]; then
             echo "::error::Branch '$HEAD_REF' violates the semantic branching policy (feat|fix|patch|hotfix|refactor|chore|test)/<slug>."
             exit 1
           fi
@@ -110,9 +111,20 @@ jobs:
       - name: Read locked hub commit
         id: lock
         shell: pwsh
+        env:
+          # True when the caller is the hub itself (its ci.yml calls this gate from a local path). The hub
+          # verifies its root copies against its own template and must always carry a lock.
+          IS_HUB: ${{ github.repository == job.workflow_repository }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $isHub = $env:IS_HUB -eq 'true'
+          "is_hub=$(if ($isHub) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
           if (-not (Test-Path -LiteralPath '.agent-governance.lock')) {
+              if ($isHub) {
+                  Write-Host "::error::The hub must carry its own .agent-governance.lock. Run Sync-AgentGovernance -RepoPath . from the hub root and commit the result."
+                  "present=false" >> $env:GITHUB_OUTPUT
+                  exit 1
+              }
               Write-Host "::notice::No .agent-governance.lock; governance integrity check skipped."
               "present=false" >> $env:GITHUB_OUTPUT
               exit 0
@@ -128,7 +140,7 @@ jobs:
 
       - name: Checkout hub at the locked commit
         id: hub
-        if: steps.lock.outputs.present == 'true'
+        if: steps.lock.outputs.present == 'true' && steps.lock.outputs.is_hub != 'true'
         continue-on-error: true
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -140,7 +152,9 @@ jobs:
           persist-credentials: false
 
       - name: Check hub pin consistency and freshness
-        if: steps.lock.outputs.present == 'true' && steps.hub.outcome == 'success'
+        # Not for the hub: its lock records the commit the sync ran from, which is by construction older than
+        # the commit under test, and freshness measures a downstream repository's distance from the hub.
+        if: steps.lock.outputs.present == 'true' && steps.lock.outputs.is_hub != 'true' && steps.hub.outcome == 'success'
         shell: pwsh
         env:
           HUB_DIR: _governance_hub
@@ -167,7 +181,7 @@ jobs:
           Write-Host "Hub pin consistent; locked hub commit is $ageDays days old."
 
       - name: Report an unreachable hub
-        if: steps.lock.outputs.present == 'true' && steps.hub.outcome != 'success'
+        if: steps.lock.outputs.present == 'true' && steps.lock.outputs.is_hub != 'true' && steps.hub.outcome != 'success'
         env:
           # Via env, never interpolated into the script, to prevent injection through the input.
           HUB_REPOSITORY: ${{ inputs.hub_repository }}
@@ -175,7 +189,13 @@ jobs:
           echo "::warning::Could not fetch ${HUB_REPOSITORY} at the locked commit; integrity check skipped. Pass a read-only hub_token secret (private hub) and make sure the locked commit is pushed."
 
       - name: Verify managed files against the hub template
-        if: steps.lock.outputs.present == 'true' && steps.hub.outcome == 'success'
+        if: steps.lock.outputs.present == 'true' && steps.lock.outputs.is_hub != 'true' && steps.hub.outcome == 'success'
         shell: pwsh
         # Runs the hub's own verifier: the caller's copy could itself have been modified.
         run: ./_governance_hub/template/scripts/guardrails/verify-governance.ps1 -HubTemplate ./_governance_hub/template
+
+      - name: Verify the hub's own root copies against its template
+        if: steps.lock.outputs.present == 'true' && steps.lock.outputs.is_hub == 'true'
+        shell: pwsh
+        # Dogfooding: the hub's AGENTS.md, rules, guardrails and agent settings must equal template/ and the lock.
+        run: ./template/scripts/guardrails/verify-governance.ps1 -HubTemplate ./template

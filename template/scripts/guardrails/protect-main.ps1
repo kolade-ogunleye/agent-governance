@@ -22,9 +22,10 @@ if ($branch -in @('main', 'master')) {
     exit 1
 }
 
-# 3. Hard regex enforcement: branch MUST match semantic taxonomy (nested segments allowed)
-$semanticRegex = '^(?i)(feat|fix|patch|hotfix|refactor|chore|test)/[a-z0-9._-]+(/[a-z0-9._-]+)*$'
-if ($branch -notmatch $semanticRegex) {
+# 3. Hard regex enforcement: branch MUST match semantic taxonomy (nested segments allowed).
+# Case-sensitive, matching the server-side branch-policy job exactly: a lowercase prefix, any-case slug.
+$semanticRegex = '^(feat|fix|patch|hotfix|refactor|chore|test)/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'
+if ($branch -cnotmatch $semanticRegex) {
     [Console]::Error.WriteLine("❌ [BLOCK] Branch '$branch' violates the repository semantic branching policy.")
     [Console]::Error.WriteLine("👉 Allowed prefixes: feat/, fix/, patch/, hotfix/, refactor/, chore/, test/")
     [Console]::Error.WriteLine("👉 Examples:")

@@ -1,0 +1,15 @@
+# Keeps the SHA-pinned GitHub Actions in this repository current. Dependabot opens pull requests from
+# dependabot/* branches, which the governance gate's branch policy accepts. The tool versions pinned in
+# workflow env blocks (Pester, PSScriptAnalyzer, Prettier, Gitleaks) and PROJECT.md (Lefthook) are not
+# Dependabot ecosystems; the weekly toolchain-freshness job in downstream-sync.yml reports those.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencies

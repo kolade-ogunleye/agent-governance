@@ -194,6 +194,18 @@ function Sync-AgentGovernance {
         return ($LASTEXITCODE -eq 0)
     }
 
+    function Test-IsHubRepo {
+        [OutputType([bool])]
+        param(
+            [Parameter(Mandatory = $true)][string]$HubDir,
+            [Parameter(Mandatory = $true)][string]$RepoDir
+        )
+        # True when the sync target is the hub repository itself (it dogfoods its own template and lock).
+        $hubRepoRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $HubDir)).Path.TrimEnd('\', '/')
+        $target = (Resolve-Path -LiteralPath $RepoDir).Path.TrimEnd('\', '/')
+        return [string]::Equals($hubRepoRoot, $target, [System.StringComparison]::OrdinalIgnoreCase)
+    }
+
     function Get-CallerWorkflow {
         [OutputType([pscustomobject])]
         param(
@@ -201,8 +213,12 @@ function Sync-AgentGovernance {
             [Parameter(Mandatory = $true)][string]$RepoDir
         )
         # Renders the managed caller workflow pinned to the hub commit. Returns Content = $null plus a
-        # Reason when the pin would not be fetchable by downstream CI.
+        # Reason when the pin would not be fetchable by downstream CI, or when the target is the hub itself
+        # (its own ci.yml calls the gate from a local path; a second caller would run every check twice).
         $hubRepoRoot = Split-Path -Parent $HubDir
+        if (Test-IsHubRepo -HubDir $HubDir -RepoDir $RepoDir) {
+            return [pscustomobject]@{ Content = $null; Reason = 'the hub dogfoods the gate through its own CI workflow'; Self = $true }
+        }
         $commit = "$(git -C $hubRepoRoot rev-parse HEAD 2>$null)".Trim()
         if ($commit -notmatch '^[0-9a-f]{40}$') { return [pscustomobject]@{ Content = $null; Reason = 'the hub is not a git checkout' } }
         $templateChanges = "$(git -C $hubRepoRoot status --porcelain -- template 2>$null)".Trim()
@@ -705,7 +721,10 @@ fi
                 Write-Verbose "Unreadable package.json in ${targetDir}; skipping npx Prettier: $($_.Exception.Message)"
             }
 
-            if ($hasPkgPrettier -and (Get-Command npx -ErrorAction SilentlyContinue)) {
+            # npx --no-install also resolves globally installed packages; a global Prettier of another version
+            # would format differently from the repository's own check, so require the local package.
+            $hasLocalPrettierPackage = Test-Path (Join-Path $targetDir "node_modules" "prettier" "package.json")
+            if ($hasPkgPrettier -and $hasLocalPrettierPackage -and (Get-Command npx -ErrorAction SilentlyContinue)) {
                 try {
                     Push-Location $targetDir
                     try {
@@ -755,11 +774,14 @@ fi
         Push-Location $resolvedDir
         try {
             # 2. Safety Gate: Check for uncommitted work in project code
+            $isHubRepo = Test-IsHubRepo -HubDir $hubDir -RepoDir $resolvedDir
             $status = (git --no-pager status --porcelain)
             if ($status) {
                 $modifiedLines = ($status -split "`r?`n") | Where-Object { $_.Trim() }
                 $nonGovChanges = $modifiedLines | Where-Object { 
                     $_ -notmatch '^\?\?\s+(\.agents|\.claude|\.codex|\.gemini|\.github|\.gitattributes|\.gitignore|AGENTS\.md|CLAUDE\.md|PROJECT\.md|WORKING\.md|lefthook\.yml|scripts/|docs/LEGACY-AGENT-NOTES\.md|\.agent-governance\.lock)' -and
+                    # On the hub, edits under template/ are the content being mirrored into the root copies.
+                    -not ($isHubRepo -and $_ -match '^.{2}\s+"?template/') -and
                     $_ -notmatch '^ M (\.gitignore|\.gitattributes)' -and
                     $_ -notmatch '^ M (\.githooks|\.husky|\.git/hooks)' -and
                     # Line-ending-only drift (CRLF stored despite eol=lf) is renormalized by the sync, not project work.
@@ -902,6 +924,8 @@ fi
                 ([System.IO.File]::ReadAllText($callerWorkflowPath) -match '(?m)^# Managed by agent-governance')
             if (-not $callerIsManaged) {
                 Write-Warning "Kept existing unmanaged .github/workflows/agent-governance.yml; rename it to let the sync manage the governance gate."
+            } elseif ($callerWorkflow.Self) {
+                Write-Host "  ✔️ Hub repository: the governance gate runs from ci.yml; no caller workflow written"
             } elseif (-not $callerWorkflow.Content) {
                 Write-Warning "Did not update .github/workflows/agent-governance.yml: $($callerWorkflow.Reason). Push the hub and re-sync."
             } else {

@@ -2,8 +2,14 @@ name: Downstream Sync
 
 # Weekly (and on demand) re-sync of every repository in fleet.json, opening or updating one pull request per
 # repository, then applies the default-branch ruleset where the plan supports it (conditional enforcement).
-# Requires the AGENT_GOVERNANCE_SYNC_TOKEN secret: a fine-grained token limited to the hub and the fleet
-# repositories with Contents, Pull requests, and Administration read/write. Without it the jobs warn and skip.
+# Credentials, in order of preference:
+#   1. A GitHub App (variable AGENT_GOVERNANCE_APP_ID + secret AGENT_GOVERNANCE_APP_PRIVATE_KEY): each job mints
+#      a short-lived installation token scoped to the one repository it touches. Install the App on the hub and
+#      the fleet repositories with Contents, Pull requests, Issues (labels, assignees) and Administration
+#      (rulesets) read/write.
+#   2. The AGENT_GOVERNANCE_SYNC_TOKEN secret: a fine-grained token limited to the hub and the fleet repositories
+#      with the same permissions. Long-lived, so prefer the App.
+# Without either, the jobs warn and skip.
 on:
   schedule:
     - cron: "43 5 * * 1"
@@ -30,10 +36,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $repos = @((Get-Content fleet.json -Raw | ConvertFrom-Json).repositories)
-          foreach ($r in $repos) {
-              if ($r -notmatch '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$') { throw "Invalid fleet entry: $r" }
+          $entries = foreach ($r in $repos) {
+              if ($r -notmatch '^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)$') { throw "Invalid fleet entry: $r" }
+              # The App token step needs the bare repository name; the rest of the job uses owner/name.
+              [pscustomobject]@{ full = $r; name = $Matches[2] }
           }
-          "repositories=$(ConvertTo-Json -InputObject $repos -Compress)" >> $env:GITHUB_OUTPUT
+          "repositories=$(ConvertTo-Json -InputObject @($entries) -Compress)" >> $env:GITHUB_OUTPUT
 
   sync:
     needs: plan
@@ -44,14 +52,29 @@ jobs:
       matrix:
         repository: ${{ fromJSON(needs.plan.outputs.repositories) }}
     steps:
-      - name: Check for the sync token
+      - name: Mint a GitHub App installation token scoped to this repository
+        id: app
+        if: vars.AGENT_GOVERNANCE_APP_ID != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.AGENT_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.AGENT_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ matrix.repository.name }}
+
+      - name: Resolve the sync credential (App installation token, else the personal access token)
         id: token
         env:
-          HAS_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN != '' }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          HAS_PAT: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN != '' }}
         run: |
-          echo "present=${HAS_TOKEN}" >> "$GITHUB_OUTPUT"
-          if [ "${HAS_TOKEN}" != "true" ]; then
-            echo "::warning::AGENT_GOVERNANCE_SYNC_TOKEN is not set; skipping downstream sync."
+          if [ -n "${APP_TOKEN}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"; echo "source=app" >> "$GITHUB_OUTPUT"
+          elif [ "${HAS_PAT}" = "true" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"; echo "source=pat" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"; echo "source=none" >> "$GITHUB_OUTPUT"
+            echo "::warning::Neither a GitHub App (AGENT_GOVERNANCE_APP_ID / AGENT_GOVERNANCE_APP_PRIVATE_KEY) nor AGENT_GOVERNANCE_SYNC_TOKEN is set; skipping downstream sync."
           fi
 
       - name: Checkout hub (full history, so the pinned commit is known to be pushed)
@@ -66,8 +89,8 @@ jobs:
         if: steps.token.outputs.present == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ matrix.repository }}
-          token: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
+          repository: ${{ matrix.repository.full }}
+          token: ${{ steps.app.outputs.token || secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
           fetch-depth: 0
           path: downstream
 
@@ -75,13 +98,15 @@ jobs:
         if: steps.token.outputs.present == 'true'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
-          GH_REPO: ${{ matrix.repository }}
+          GH_TOKEN: ${{ steps.app.outputs.token || secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
+          GH_REPO: ${{ matrix.repository.full }}
+          # An App token has no "@me"; assign the pull request to the repository owner instead.
+          SYNC_ASSIGNEE: ${{ steps.token.outputs.source == 'app' && github.repository_owner || '@me' }}
         run: |
           $ErrorActionPreference = 'Stop'
           git -C downstream config user.name 'agent-governance-sync'
           git -C downstream config user.email 'agent-governance-sync@users.noreply.github.com'
-          $result = ./hub/Invoke-DownstreamSync.ps1 -RepoPath downstream -InstallFormatter
+          $result = ./hub/Invoke-DownstreamSync.ps1 -RepoPath downstream -InstallFormatter -Assignee $env:SYNC_ASSIGNEE
           Write-Host "$($env:GH_REPO): $($result.Action) $($result.Branch)"
           $closed = if ($result.Superseded) { " (closed superseded: #$($result.Superseded -join ', #'))" } else { '' }
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- **$($env:GH_REPO)**: $($result.Action) $($result.Branch)$closed"
@@ -90,8 +115,8 @@ jobs:
         if: steps.token.outputs.present == 'true'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
-          REPOSITORY: ${{ matrix.repository }}
+          GH_TOKEN: ${{ steps.app.outputs.token || secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
+          REPOSITORY: ${{ matrix.repository.full }}
         run: |
           $ErrorActionPreference = 'Stop'
           $result = ./hub/Set-GovernanceRuleset.ps1 -Repository $env:REPOSITORY -Confirm:$false
@@ -101,14 +126,27 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Check for the sync token
+      - name: Mint a GitHub App installation token scoped to the hub
+        id: app
+        if: vars.AGENT_GOVERNANCE_APP_ID != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.AGENT_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.AGENT_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Resolve the credential (App installation token, else the personal access token)
         id: token
         env:
-          HAS_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN != '' }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          HAS_PAT: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN != '' }}
         run: |
-          echo "present=${HAS_TOKEN}" >> "$GITHUB_OUTPUT"
-          if [ "${HAS_TOKEN}" != "true" ]; then
-            echo "::warning::AGENT_GOVERNANCE_SYNC_TOKEN is not set; skipping hub ruleset enforcement."
+          if [ -n "${APP_TOKEN}" ] || [ "${HAS_PAT}" = "true" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Neither a GitHub App nor AGENT_GOVERNANCE_SYNC_TOKEN is set; skipping hub ruleset enforcement."
           fi
 
       - name: Checkout hub
@@ -121,7 +159,7 @@ jobs:
         if: steps.token.outputs.present == 'true'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
+          GH_TOKEN: ${{ steps.app.outputs.token || secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
           HUB_REPOSITORY: ${{ github.repository }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -129,3 +167,21 @@ jobs:
           $checks = @('governance-gate / secret-scan', 'governance-gate / integrity', 'verify (ubuntu-latest)', 'verify (windows-latest)')
           $result = ./Set-GovernanceRuleset.ps1 -Repository $env:HUB_REPOSITORY -Confirm:$false -RequiredCheck $checks
           Write-Host "$($env:HUB_REPOSITORY): ruleset $($result.Status) $($result.Action)"
+
+  toolchain-freshness:
+    # Advisory: the pinned tool versions (Pester, PSScriptAnalyzer, Prettier, Gitleaks, Lefthook) are not
+    # Dependabot ecosystems, so this compares them with the latest releases and warns in the run summary.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout hub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare pinned tool versions with the latest releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./Test-ToolchainFreshness.ps1
+

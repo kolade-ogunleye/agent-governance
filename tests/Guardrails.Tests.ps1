@@ -37,6 +37,18 @@ Describe 'protect-main.ps1' {
         (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
     }
 
+    It 'blocks a mixed-case prefix, as the server-side branch policy does (parity)' {
+        git -C $Repo checkout --quiet -b Feat/mixed-case
+        $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'semantic branching policy'
+    }
+
+    It 'allows a mixed-case slug after a lowercase prefix, as the server-side branch policy does (parity)' {
+        git -C $Repo checkout --quiet -b feat/Add-Thing
+        (Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo).ExitCode | Should -Be 0
+    }
+
     It 'blocks a staged <Path> session ledger on a feature branch (plan defect 8)' -ForEach @(
         @{ Path = 'WORKING.md' }, @{ Path = '.agents/state/feat-x.md' }
     ) {

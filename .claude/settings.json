@@ -32,7 +32,32 @@
       "Edit(id_dsa)",
       "Edit(id_ecdsa)",
       "Edit(id_ed25519)",
-      "Edit(credentials.json)"
+      "Edit(credentials.json)",
+      "Bash(*--no-verif*)",
+      "Bash(*LEFTHOOK=*)",
+      "Bash(*LEFTHOOK_EXCLUDE=*)",
+      "Bash(*lefthook install*)",
+      "Bash(*lefthook uninstall*)",
+      "Bash(*core.hooksPath=*)",
+      "Bash(git config *core.hooksPath *)",
+      "Bash(git config *unset* core.hooksPath*)",
+      "Bash(*GIT_CONFIG_COUNT=*)",
+      "Bash(*GIT_CONFIG_PARAMETERS=*)",
+      "Bash(git push * main)",
+      "Bash(git push * main *)",
+      "Bash(git push *:main)",
+      "Bash(git push *:main *)",
+      "Bash(git push * master)",
+      "Bash(git push * master *)",
+      "Bash(git push *:master)",
+      "Bash(git push *:master *)",
+      "Bash(git push *refs/heads/main*)",
+      "Bash(git push *refs/heads/master*)",
+      "Bash(*>*.git/hooks/*)",
+      "Bash(rm *.git/hooks/*)",
+      "Bash(mv *.git/hooks/*)",
+      "Bash(cp *.git/hooks/*)",
+      "Bash(chmod *.git/hooks/*)"
     ]
   },
   "sandbox": {
@@ -48,6 +73,59 @@
         "./**/.env",
         "./**/*.pem",
         "./**/*.key"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "*.github.com",
+        "*.githubusercontent.com",
+        "registry.npmjs.org",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "crates.io",
+        "static.crates.io",
+        "index.crates.io",
+        "proxy.golang.org",
+        "sum.golang.org",
+        "repo.packagist.org",
+        "packagist.org",
+        "www.powershellgallery.com",
+        "api.nuget.org"
+      ]
+    },
+    "credentials": {
+      "files": [
+        {
+          "path": "~/.aws/credentials",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.ssh",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.gnupg",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.git-credentials",
+          "mode": "deny"
+        }
+      ],
+      "envVars": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "mode": "deny"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "mode": "deny"
+        },
+        {
+          "name": "AZURE_CLIENT_SECRET",
+          "mode": "deny"
+        }
       ]
     }
   },
