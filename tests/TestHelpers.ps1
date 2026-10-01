@@ -1,5 +1,13 @@
 $ErrorActionPreference = 'Stop'
 
+# The governance hook block the engine installs fails closed for detected agent sessions when Lefthook is
+# missing, and fixtures in this suite commit through that hook. Running the suite from inside an agent session
+# (every Claude Code session sets CLAUDECODE) must not change the results, so the markers are cleared for this
+# test process. The detection itself is covered by AgentSessionGate.Tests.ps1, which sets a marker deliberately.
+foreach ($marker in @('CLAUDECODE', 'CLAUDE_CODE', 'AI_AGENT', 'AGENT_ROLE', 'GEMINI_CLI', 'CODEX_AGENT', 'COPILOT_AGENT')) {
+    if (Test-Path -LiteralPath "env:$marker") { Remove-Item -LiteralPath "env:$marker" }
+}
+
 function New-TestRepo {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Creates disposable fixtures inside Pester TestDrive only.')]
     [CmdletBinding()]

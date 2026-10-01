@@ -28,6 +28,27 @@ Describe 'Policy-coverage eval (deterministic)' {
         $LASTEXITCODE | Should -Be 1
         (Get-Content $report -Raw | ConvertFrom-Json).Summary.Failures | Should -Match 'harmless-status'
     }
+
+    It 'documents accepted misses in the catalogue and keeps them out of the catch rate' {
+        $scenarios = (Get-Content (Join-Path $EvalsDir 'policy-scenarios.json') -Raw | ConvertFrom-Json).scenarios
+        $misses = @($scenarios | Where-Object accepted_miss)
+        $misses.Count | Should -BeGreaterThan 0
+        foreach ($m in $misses) { $m.expect | Should -Be 'block' }
+        $report = Join-Path $TestDrive 'policy-eval-misses.json'
+        & pwsh -NoProfile -File (Join-Path $EvalsDir 'Invoke-PolicyEval.ps1') -OutputPath $report *> $null
+        $summary = (Get-Content $report -Raw | ConvertFrom-Json).Summary
+        $summary.AcceptedMisses | Should -Be "$($misses.Count)/$($misses.Count)"
+        $summary.CatchRate | Should -Be 1
+    }
+
+    It 'fails when an accepted miss is caught, so the documentation cannot go stale' {
+        $catalogue = Join-Path $TestDrive 'stale-miss.json'
+        [System.IO.File]::WriteAllText($catalogue, '{ "scenarios": [ { "id": "now-caught", "contract": "5.3", "expect": "block", "layer": "bash-guard", "accepted_miss": true, "command": "lefthook uninstall" } ] }')
+        $report = Join-Path $TestDrive 'stale-miss-report.json'
+        & pwsh -NoProfile -File (Join-Path $EvalsDir 'Invoke-PolicyEval.ps1') -ScenarioPath $catalogue -OutputPath $report *> $null
+        $LASTEXITCODE | Should -Be 1
+        (Get-Content $report -Raw | ConvertFrom-Json).Summary.Failures | Should -Match 'now-caught \(accepted miss is now blocked'
+    }
 }
 
 Describe 'Live-eval graders' {

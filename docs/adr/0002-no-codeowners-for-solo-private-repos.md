@@ -19,6 +19,10 @@ Do not ship CODEOWNERS files from the hub for now.
 - After an upgrade, requiring code-owner review would block a sole maintainer from merging their own pull requests, so it must not be enabled until there is a second reviewer.
 - Tampering with hub-managed files is detected instead by the governance gate's integrity job and the lock manifest.
 
+## Update 2026-10-01: the account is on GitHub Pro
+
+The plan premise above no longer holds: the account moved to GitHub Pro, where rulesets, branch protection and CODEOWNERS all apply to private repositories. The weekly fleet workflow has since applied the default-branch ruleset to the hub (verified on 2026-10-01) and applies it to every fleet repository. The decision itself is unchanged because the second condition still holds: with one maintainer, a required code-owner review would block every pull request they open. The hub-managed files remain protected by the governance gate's integrity job, which the ruleset now requires.
+
 ## Revisit when
 
-- A second maintainer joins, and the fleet is on a plan that supports code owners for private repositories.
+- A second maintainer joins. The plan already supports code owners for private repositories.
