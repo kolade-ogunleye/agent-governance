@@ -1,8 +1,10 @@
 # Changelog
 
-All notable changes to the hub are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases carry semantic version tags (`v1.2.1` is the latest). Downstream repositories pin the hub by commit SHA, so each entry also records the date it reached `main`. When the Unreleased section ships, rename it to the new version (the next minor after `v1.2.1` is `v1.3.0`) and tag the merge commit.
+All notable changes to the hub are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases carry semantic version tags (`v1.3.0` is the latest). Downstream repositories pin the hub by commit SHA, so each entry also records the date it reached `main`. When the Unreleased section ships, rename it to the new version (the next minor after `v1.3.0` is `v1.4.0`), add a fresh empty Unreleased heading above it, and tag the merge commit.
 
 ## Unreleased
+
+## 1.3.0 - 2026-10-01
 
 ### Security
 
