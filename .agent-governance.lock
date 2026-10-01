@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hub": {
-    "commit": "996ec60272e4a963c6eb5aaa02a159b958a67a54",
+    "commit": "471500a3a60cdbd67ab90d35152f85b2ffc8a0ef",
     "dirty": false
   },
   "files": {
@@ -46,7 +46,7 @@
     ".claude/rules/security-performance.md":
       "8932cf2ec1fb6a485227fd406be60ceeaa0e54931e713a7b5b39866c99df65cf",
     "scripts/guardrails/agent-bash-guard.ps1":
-      "c05ec5e9aea6ee7371ace71004b9bb95274ac1bd796bae8f02b1a9f866f24706",
+      "0eebfc703432c09554b074522a5be5654f0693b1d784b8fccd2966751182be57",
     "scripts/guardrails/audit-dependencies.ps1":
       "106ca909883f5af1fbeab7b6ab49f3e4ea293bde56aaaa26d0bbd5ba3eef1dcc",
     "scripts/guardrails/check-drift.ps1":
@@ -64,7 +64,7 @@
     "scripts/guardrails/verify-governance.ps1":
       "d730fd9526331a7afa5675ed5406108308828af47d9b7a5e1edc264fce2d25b9",
     ".claude/settings.json":
-      "ad0a173f861f003c249ef08210e67fa9bd696f6316838a0c49eeba707bf7e4b8",
+      "623af7457ecd32b3ae9e0126f199ee20fd2bb51311b9480061b4bc467bbf8d54",
     ".gemini/settings.json":
       "69e6311ed094b0d0623cb1133a56c422a336355499a206395c87e7ccc2801ce7",
     ".codex/config.toml":
