@@ -29,8 +29,9 @@ function ConvertTo-InspectableText {
     param([Parameter(Mandatory = $true)][string]$Text)
     # A quoted single word keeps its content: quotes do not change what reaches git ('--no-verify' is the flag),
     # so they must not hide it from the matcher. Quoted text containing whitespace is prose (commit messages,
-    # echo arguments) and is blanked so flags merely mentioned in it are not counted.
-    $unquote = { param($m) $inner = $m.Groups[1].Value; if ($inner -match '^[^\s;&|]*$') { $inner } else { '""' } }
+    # echo arguments) and is blanked so flags merely mentioned in it are not counted, unless it embeds a command
+    # substitution: "$(git rev-parse --git-dir)/hooks/x" is a path, and its inner command runs.
+    $unquote = { param($m) $inner = $m.Groups[1].Value; if ($inner -match '^[^\s;&|]*$' -or $inner -match '\$\(|`') { $inner } else { '""' } }
     $text = [regex]::Replace($Text, '"((?:[^"\\]|\\.)*)"', $unquote)
     return [regex]::Replace($text, "'([^']*)'", $unquote)
 }
@@ -47,18 +48,45 @@ foreach ($m in [regex]::Matches($stripped, $nested)) {
 
 # One shell segment: stops at command separators and pipes.
 $seg = '[^;&|\n]*'
-$hookFile = '(?:\.git[\\/]hooks|\.githooks|\.husky)[\\/](?:pre-commit|pre-push)\b'
+
+# Hook scripts live in .git/hooks or in the directory core.hooksPath names (.githooks, .husky, ...), which the
+# sync engine chains the governance gate into. A write, deletion, mode change or directory change there
+# disables the gate without any flag, so those are matched at directory level.
+$hookDirs = [System.Collections.Generic.List[string]]::new()
+$hookDirs.Add('(?:\.git|--git-dir\)?)[\\/]hooks')
+$hookDirs.Add('--git-path\s+hooks')
+$hookDirs.Add('\.githooks')
+$hookDirs.Add('\.husky')
+try {
+    if (Get-Command git -CommandType Application -ErrorAction SilentlyContinue) {
+        $configured = "$(& git config --get core.hooksPath 2>$null)".Trim()
+        if ($LASTEXITCODE -eq 0 -and $configured) { $hookDirs.Add([regex]::Escape($configured.TrimEnd('/', '\'))) }
+    }
+} catch {
+    # The default hook directories stay guarded; a failed lookup must never disable the check.
+    $configured = $null
+}
+$hookDir = '(?:' + ($hookDirs -join '|') + ')(?=[\\/\s;&|)]|$)'
+# Commands that create, replace, remove or re-mode files, and directory changes (a later relative write would
+# name no hook path). PowerShell cmdlets and their aliases included.
+$writers = 'rm|rmdir|unlink|mv|cp|tee|chmod|chattr|ln|install|truncate|dd|cd|pushd|sed\s+-i\S*|' +
+    'Remove-Item|Move-Item|Copy-Item|Rename-Item|Set-Content|Add-Content|Clear-Content|Out-File|New-Item|Set-Location|Push-Location|' +
+    'ri|del|erase|rd|mi|move|cpi|copy|rni|ren|sc|ac|clc|ni|sl|chdir'
+
 $rules = [ordered]@{
     # Git accepts any unambiguous abbreviation of a long option, so --no-verif (and longer) is --no-verify.
     'git --no-verify skips the governance hooks'                             = "\bgit\b$seg\s--no-verif\w*"
-    'git commit -n skips the governance hooks'                               = "\bgit\b$seg\bcommit\b$seg\s-[A-Za-z]*n[A-Za-z]*\b"
+    # Only git commit's argument-less short flags can precede -n in a cluster; -m<msg> glues a value (-mnew is a message).
+    'git commit -n skips the governance hooks'                               = "\bgit\b$seg\bcommit\b$seg\s-[apzseiovq]*n[A-Za-z]*\b"
     'a shell variable holding a hook-bypass flag hides it from review'       = '(?:^|[\s;&|(])\$?\w+\s*=\s*["'']?--no-verif'
     'LEFTHOOK=0 / LEFTHOOK_EXCLUDE disables the governance hooks'            = '\bLEFTHOOK(_EXCLUDE)?\s*=|\benv:LEFTHOOK'
     'lefthook install/uninstall replaces the fail-closed governance gate'    = '\blefthook\s+(install|uninstall)\b'
     'overriding core.hooksPath redirects git away from governance hooks'     = "\bcore\.hooksPath\s*=|\bgit\b$seg\bconfig\b$seg\bcore\.hooksPath\s+[^\s;&|]|\bgit\b$seg\bconfig\b$seg\b(?:--)?unset(?:-all)?\s+core\.hooksPath"
-    'GIT_CONFIG_* environment overrides redirect git configuration'          = '\bGIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)\s*=|\benv:GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)'
+    # GIT_CONFIG_COUNT/KEY_n/VALUE_n, GIT_CONFIG_PARAMETERS, GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM inject
+    # configuration (core.hooksPath included) without a visible -c.
+    'GIT_CONFIG_* environment overrides redirect git configuration'          = '\bGIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS|GLOBAL|SYSTEM)\s*=|\benv:GIT_CONFIG_'
     'pushing directly to main/master bypasses review'                        = "\bgit\b$seg\bpush\b$seg(?:\s\+?|:|refs/heads/)(?:main|master)(?=$|[\s;&|:])"
-    'overwriting or removing a git hook file disables the governance gate'   = "(?:>>?|\b(?:rm|mv|cp|tee|chmod|truncate|install|ln|dd|sed\s+-i\S*|Set-Content|Out-File|Remove-Item|Move-Item|Copy-Item|Clear-Content|Add-Content|New-Item)\b)$seg$hookFile"
+    'writing to the git hooks directory disables the governance gate'        = "(?:>>?|\b(?:$writers)\b)$seg$hookDir"
 }
 
 $violations = [System.Collections.Generic.List[string]]::new()

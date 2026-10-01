@@ -421,6 +421,60 @@ Describe 'agent-bash-guard.ps1 bypass variants (red-team 2026-10-01)' {
         $guard | Should -Match 'Accepted misses'
         Join-Path $RepoRoot 'docs' 'adr' '0003-command-guard-defence-in-depth.md' | Should -Exist
     }
+
+    It 'blocks hook-directory tampering in the form: <Command>' -ForEach @(
+        @{ Command = 'cd .git/hooks && printf "exit 0" > pre-commit' }
+        @{ Command = 'echo exit 0 > "$(git rev-parse --git-dir)/hooks/pre-commit"' }
+        @{ Command = 'echo exit 0 | tee .githooks/pre-commit' }
+        @{ Command = 'rm -rf .git/hooks' }
+        @{ Command = 'Rename-Item .git/hooks/pre-commit pre-commit.off' }
+        @{ Command = 'ri .git/hooks/pre-push' }
+        @{ Command = 'GIT_CONFIG_GLOBAL=/tmp/evil.gitconfig git commit -m wip' }
+        @{ Command = '$env:GIT_CONFIG_GLOBAL = "C:\evil.gitconfig"; git commit -m wip' }
+    ) {
+        (Invoke-HookScript -ScriptPath $Guard -InputText (ConvertTo-HookPayload $Command)).ExitCode | Should -Be 2
+    }
+
+    It 'still allows the look-alike: <Command>' -ForEach @(
+        @{ Command = 'git commit -mnew-feature' }
+        @{ Command = 'git commit -m "$(date +%F) nightly build"' }
+        @{ Command = 'ls -la .git/hooks' }
+        @{ Command = 'head -n 5 .githooks/pre-commit' }
+        @{ Command = 'git -C .git/hooks status' }
+    ) {
+        (Invoke-HookScript -ScriptPath $Guard -InputText (ConvertTo-HookPayload $Command)).ExitCode | Should -Be 0
+    }
+
+    It 'guards a custom core.hooksPath directory of the repository it runs in' {
+        $repo = New-TestRepo -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
+        git -C $repo config core.hooksPath tooling/hooks
+        Push-Location $repo
+        try {
+            (Invoke-HookScript -ScriptPath $Guard -InputText (ConvertTo-HookPayload 'cp /tmp/empty tooling/hooks/pre-commit')).ExitCode | Should -Be 2
+            (Invoke-HookScript -ScriptPath $Guard -InputText (ConvertTo-HookPayload 'cat tooling/hooks/pre-commit')).ExitCode | Should -Be 0
+        } finally { Pop-Location }
+    }
+}
+
+Describe 'Claude Code settings template: PowerShell and Edit coverage' {
+    BeforeAll {
+        $script:Deny = @((Get-Content (Join-Path $RepoRoot 'template' '.claude' 'settings.json') -Raw | ConvertFrom-Json).permissions.deny)
+    }
+
+    It 'mirrors every Bash deny rule for the PowerShell tool' {
+        foreach ($rule in ($Deny | Where-Object { $_ -like 'Bash(*' })) {
+            $Deny | Should -Contain ('PowerShell(' + $rule.Substring(5))
+        }
+    }
+
+    It 'denies the Edit tool on hook directories (<_>)' -ForEach @('Edit(.git/hooks/**)', 'Edit(.githooks/**)', 'Edit(.husky/**)') {
+        $Deny | Should -Contain $_
+    }
+
+    It 'covers the GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM file overrides' {
+        $Deny | Should -Contain 'Bash(*GIT_CONFIG_GLOBAL=*)'
+        $Deny | Should -Contain 'Bash(*GIT_CONFIG_SYSTEM=*)'
+    }
 }
 
 Describe 'Claude Code settings template: native deny rules and sandbox hardening' {

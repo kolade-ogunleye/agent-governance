@@ -6,6 +6,9 @@
     allow) against the real enforcement layers: the Claude Code PreToolUse Bash guard and the pre-commit
     guardrail scripts. Reports the catch rate and false-positive rate and exits 1 on any mismatch, so CI can
     gate on it. It measures the enforcement machinery, not model behaviour; see Invoke-LiveAgentEval.ps1.
+    A scenario flagged accepted_miss is a forbidden action the layer is documented not to catch (ADR 0003): it
+    is excluded from the catch rate and passes only while it is still missed, so a guard change that catches it
+    must also drop the flag and update the documentation.
 .PARAMETER ScenarioPath
     Scenario catalogue (JSON). Defaults to policy-scenarios.json beside this script.
 .PARAMETER GuardDir
@@ -108,9 +111,11 @@ try {
         # The Bash guard signals a block with exit 2 (Claude Code's contract); guardrail scripts with any non-zero.
         $blocked = if ($scenario.layer -eq 'bash-guard') { $exit -eq 2 } else { $exit -ne 0 }
         $actual = if ($blocked) { 'block' } else { 'allow' }
+        $acceptedMiss = [bool]$scenario.accepted_miss
         $results.Add([pscustomobject]@{
                 Id = $scenario.id; Contract = $scenario.contract; Layer = $scenario.layer
-                Expected = $scenario.expect; Actual = $actual; Pass = ($actual -eq $scenario.expect)
+                Expected = $scenario.expect; Actual = $actual; AcceptedMiss = $acceptedMiss
+                Pass = $(if ($acceptedMiss) { $actual -eq 'allow' } else { $actual -eq $scenario.expect })
             })
     }
 } finally {
@@ -119,8 +124,9 @@ try {
     Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$mustBlock = @($results | Where-Object Expected -eq 'block')
+$mustBlock = @($results | Where-Object { $_.Expected -eq 'block' -and -not $_.AcceptedMiss })
 $mustAllow = @($results | Where-Object Expected -eq 'allow')
+$acceptedMisses = @($results | Where-Object AcceptedMiss)
 $caught = @($mustBlock | Where-Object Pass).Count
 $falsePositives = @($mustAllow | Where-Object { -not $_.Pass }).Count
 $summary = [pscustomobject]@{
@@ -129,11 +135,15 @@ $summary = [pscustomobject]@{
     FalsePositiveRate = if ($mustAllow.Count) { [Math]::Round($falsePositives / $mustAllow.Count, 4) } else { 0 }
     Caught            = "$caught/$($mustBlock.Count)"
     FalsePositives    = "$falsePositives/$($mustAllow.Count)"
-    Failures          = @($results | Where-Object { -not $_.Pass } | ForEach-Object { "$($_.Id) (expected $($_.Expected), got $($_.Actual))" })
+    AcceptedMisses    = "$(@($acceptedMisses | Where-Object Pass).Count)/$($acceptedMisses.Count)"
+    Failures          = @($results | Where-Object { -not $_.Pass } | ForEach-Object {
+            if ($_.AcceptedMiss) { "$($_.Id) (accepted miss is now blocked; remove accepted_miss from the catalogue and update ADR 0003)" }
+            else { "$($_.Id) (expected $($_.Expected), got $($_.Actual))" }
+        })
 }
 
-$results | Format-Table Id, Contract, Layer, Expected, Actual, Pass -AutoSize | Out-String -Width 160 | Write-Information -InformationAction Continue
-Write-Information "Catch rate: $($summary.Caught) ($($summary.CatchRate * 100)%); false positives: $($summary.FalsePositives) ($($summary.FalsePositiveRate * 100)%)" -InformationAction Continue
+$results | Format-Table Id, Contract, Layer, Expected, Actual, AcceptedMiss, Pass -AutoSize | Out-String -Width 160 | Write-Information -InformationAction Continue
+Write-Information "Catch rate: $($summary.Caught) ($($summary.CatchRate * 100)%); false positives: $($summary.FalsePositives) ($($summary.FalsePositiveRate * 100)%); accepted misses still missed: $($summary.AcceptedMisses)" -InformationAction Continue
 if ($OutputPath) { [pscustomobject]@{ Summary = $summary; Results = $results } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $OutputPath -Encoding utf8NoBOM }
 
 if ($summary.Failures.Count -gt 0) {

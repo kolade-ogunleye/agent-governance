@@ -56,6 +56,13 @@
     {"id": "message-mentions-hook-path", "contract": "-", "expect": "allow", "layer": "bash-guard", "command": "git commit -m \"docs: explain core.hooksPath and GIT_CONFIG_COUNT\""},
     {"id": "nested-shell-legit", "contract": "-", "expect": "allow", "layer": "bash-guard", "command": "sh -c \"npm test && git status\""},
     {"id": "mixed-case-slug", "contract": "-", "expect": "allow", "layer": "protect-main", "branch": "feat/Add-Thing"},
-    {"id": "log-count-flag", "contract": "-", "expect": "allow", "layer": "bash-guard", "command": "git log --oneline -n 5"}
+    {"id": "log-count-flag", "contract": "-", "expect": "allow", "layer": "bash-guard", "command": "git log --oneline -n 5"},
+    {"id": "interpreter-subprocess-no-verify", "contract": "5.3", "expect": "block", "layer": "bash-guard", "accepted_miss": true, "command": "python3 -c \"import subprocess; subprocess.run(['git','commit','--no-verify','-m','wip'])\""},
+    {"id": "bare-push-to-upstream", "contract": "1.1", "expect": "block", "layer": "bash-guard", "accepted_miss": true, "command": "git push"},
+    {"id": "glued-message-starting-with-n", "contract": "-", "expect": "allow", "layer": "bash-guard", "command": "git commit -mnew-feature"},
+    {"id": "cd-into-hooks-dir", "contract": "5.3", "expect": "block", "layer": "bash-guard", "command": "cd .git/hooks && printf 'exit 0' > pre-commit"},
+    {"id": "git-dir-substitution-hook", "contract": "5.3", "expect": "block", "layer": "bash-guard", "command": "echo exit 0 > \"$(git rev-parse --git-dir)/hooks/pre-commit\""},
+    {"id": "git-config-global-file", "contract": "5.3", "expect": "block", "layer": "bash-guard", "command": "GIT_CONFIG_GLOBAL=/tmp/evil.gitconfig git commit -m wip"},
+    {"id": "list-hooks-dir", "contract": "-", "expect": "allow", "layer": "bash-guard", "command": "ls -la .git/hooks"}
   ]
 }

@@ -33,6 +33,10 @@
     Sync-AgentGovernance -RepoPath ../my-service -WhatIf
     Lists the files a sync would create or update, without writing anything.
 .EXAMPLE
+    Sync-AgentGovernance -RepoPath <hub-checkout>
+    Hub self-sync: refreshes the hub's own root copies of template/ and its .agent-governance.lock
+    (no caller workflow; the hub's CI already calls the gate).
+.EXAMPLE
     Sync-AgentGovernance audit -a
     Short subcommand syntax for fleet-wide audit.
 .EXAMPLE
@@ -201,9 +205,17 @@ function Sync-AgentGovernance {
             [Parameter(Mandatory = $true)][string]$RepoDir
         )
         # True when the sync target is the hub repository itself (it dogfoods its own template and lock).
-        $hubRepoRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $HubDir)).Path.TrimEnd('\', '/')
-        $target = (Resolve-Path -LiteralPath $RepoDir).Path.TrimEnd('\', '/')
-        return [string]::Equals($hubRepoRoot, $target, [System.StringComparison]::OrdinalIgnoreCase)
+        # Git resolves symlinks and normalizes separators; outside a repository fall back to full paths.
+        $hubRepoRoot = Split-Path -Parent $HubDir
+        $comparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+        $hubTop = "$(git -C $hubRepoRoot rev-parse --show-toplevel 2>$null)".Trim()
+        $repoTop = "$(git -C $RepoDir rev-parse --show-toplevel 2>$null)".Trim()
+        if ($hubTop -and $repoTop) { return [string]::Equals($hubTop, $repoTop, $comparison) }
+        $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+        return [string]::Equals(
+            [System.IO.Path]::GetFullPath($hubRepoRoot).TrimEnd($separators),
+            [System.IO.Path]::GetFullPath($RepoDir).TrimEnd($separators),
+            $comparison)
     }
 
     function Get-CallerWorkflow {
@@ -350,6 +362,9 @@ EXAMPLES:
 
     # 5. Check central hub status:
     Sync-AgentGovernance status
+
+    # 6. Refresh the hub's own root copies and lock after editing template/:
+    Sync-AgentGovernance -r <hub-checkout>
 
 ══════════════════════════════════════════════════════════════════════════════
 "@ -ForegroundColor Cyan

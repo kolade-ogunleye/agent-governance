@@ -3,7 +3,7 @@ name: Downstream Sync
 # Weekly (and on demand) re-sync of every repository in fleet.json, opening or updating one pull request per
 # repository, then applies the default-branch ruleset where the plan supports it (conditional enforcement).
 # Credentials, in order of preference:
-#   1. A GitHub App (variable AGENT_GOVERNANCE_APP_ID + secret AGENT_GOVERNANCE_APP_PRIVATE_KEY): each job mints
+#   1. A GitHub App (variable AGENT_GOVERNANCE_APP_CLIENT_ID + secret AGENT_GOVERNANCE_APP_PRIVATE_KEY): each job mints
 #      a short-lived installation token scoped to the one repository it touches. Install the App on the hub and
 #      the fleet repositories with Contents, Pull requests, Issues (labels, assignees) and Administration
 #      (rulesets) read/write.
@@ -54,13 +54,19 @@ jobs:
     steps:
       - name: Mint a GitHub App installation token scoped to this repository
         id: app
-        if: vars.AGENT_GOVERNANCE_APP_ID != ''
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        if: vars.AGENT_GOVERNANCE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.AGENT_GOVERNANCE_APP_ID }}
+          client-id: ${{ vars.AGENT_GOVERNANCE_APP_CLIENT_ID }}
           private-key: ${{ secrets.AGENT_GOVERNANCE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ matrix.repository.name }}
+          # Least privilege: the token carries only what this job uses, whatever the installation holds.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-administration: write
+          permission-metadata: read
 
       - name: Resolve the sync credential (App installation token, else the personal access token)
         id: token
@@ -74,7 +80,7 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"; echo "source=pat" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"; echo "source=none" >> "$GITHUB_OUTPUT"
-            echo "::warning::Neither a GitHub App (AGENT_GOVERNANCE_APP_ID / AGENT_GOVERNANCE_APP_PRIVATE_KEY) nor AGENT_GOVERNANCE_SYNC_TOKEN is set; skipping downstream sync."
+            echo "::warning::Neither a GitHub App (AGENT_GOVERNANCE_APP_CLIENT_ID / AGENT_GOVERNANCE_APP_PRIVATE_KEY) nor AGENT_GOVERNANCE_SYNC_TOKEN is set; skipping downstream sync."
           fi
 
       - name: Checkout hub (full history, so the pinned commit is known to be pushed)
@@ -128,13 +134,16 @@ jobs:
     steps:
       - name: Mint a GitHub App installation token scoped to the hub
         id: app
-        if: vars.AGENT_GOVERNANCE_APP_ID != ''
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        if: vars.AGENT_GOVERNANCE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.AGENT_GOVERNANCE_APP_ID }}
+          client-id: ${{ vars.AGENT_GOVERNANCE_APP_CLIENT_ID }}
           private-key: ${{ secrets.AGENT_GOVERNANCE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          permission-administration: write
+          permission-contents: read
+          permission-metadata: read
 
       - name: Resolve the credential (App installation token, else the personal access token)
         id: token
