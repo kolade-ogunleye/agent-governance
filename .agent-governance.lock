@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "hub": {
+    "commit": "996ec60272e4a963c6eb5aaa02a159b958a67a54",
+    "dirty": false
+  },
+  "files": {
+    "AGENTS.md":
+      "3749104f4769699e8c6b2f23d2bb7e30feb4578eed6d86c465e0c137b53f02bc",
+    "CLAUDE.md":
+      "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
+    ".github/copilot-instructions.md":
+      "3749104f4769699e8c6b2f23d2bb7e30feb4578eed6d86c465e0c137b53f02bc",
+    "lefthook.yml":
+      "3d2ec027108ff0ebc0fb3377ea24c32fb430a6355317c7f0a4ab581102efa4f5",
+    ".agents/rules/lang-go.md":
+      "82a02cd7585f116af20fe69838022420a468a15d32c6877899ccba6f33cce658",
+    ".claude/rules/lang-go.md":
+      "82a02cd7585f116af20fe69838022420a468a15d32c6877899ccba6f33cce658",
+    ".agents/rules/lang-python.md":
+      "f266e60ac7a6c0fdc6b6ed9ea11973972c830ddda268c1151befa0a810708a6c",
+    ".claude/rules/lang-python.md":
+      "f266e60ac7a6c0fdc6b6ed9ea11973972c830ddda268c1151befa0a810708a6c",
+    ".agents/rules/lang-rust.md":
+      "40cc0b05df7335bc10dbc7cafdca8806d58c14b752ac1faf06f563cf5dac6d5d",
+    ".claude/rules/lang-rust.md":
+      "40cc0b05df7335bc10dbc7cafdca8806d58c14b752ac1faf06f563cf5dac6d5d",
+    ".agents/rules/lang-shell.md":
+      "81522b60758f4f2b64f76549b4d9399e457516dffb3afc441a093cd6a0c8dad1",
+    ".claude/rules/lang-shell.md":
+      "81522b60758f4f2b64f76549b4d9399e457516dffb3afc441a093cd6a0c8dad1",
+    ".agents/rules/lang-sql.md":
+      "5fa8b020256241daf545f01949ee7343a65abf437c6395576a8bfa676fad621e",
+    ".claude/rules/lang-sql.md":
+      "5fa8b020256241daf545f01949ee7343a65abf437c6395576a8bfa676fad621e",
+    ".agents/rules/lang-typescript.md":
+      "fd1b60789f3e3ddc1cc1612b7b80d9cedd95f3bd04d1cb11d0f521a1942e304b",
+    ".claude/rules/lang-typescript.md":
+      "fd1b60789f3e3ddc1cc1612b7b80d9cedd95f3bd04d1cb11d0f521a1942e304b",
+    ".agents/rules/languages.md":
+      "7fc1eccf2482d747d3d4a89b9e5222af38211748773690a9cd8c2b723dbabe6c",
+    ".claude/rules/languages.md":
+      "7fc1eccf2482d747d3d4a89b9e5222af38211748773690a9cd8c2b723dbabe6c",
+    ".agents/rules/security-performance.md":
+      "8932cf2ec1fb6a485227fd406be60ceeaa0e54931e713a7b5b39866c99df65cf",
+    ".claude/rules/security-performance.md":
+      "8932cf2ec1fb6a485227fd406be60ceeaa0e54931e713a7b5b39866c99df65cf",
+    "scripts/guardrails/agent-bash-guard.ps1":
+      "c05ec5e9aea6ee7371ace71004b9bb95274ac1bd796bae8f02b1a9f866f24706",
+    "scripts/guardrails/audit-dependencies.ps1":
+      "106ca909883f5af1fbeab7b6ab49f3e4ea293bde56aaaa26d0bbd5ba3eef1dcc",
+    "scripts/guardrails/check-drift.ps1":
+      "be5654c37d8db275a09403317119f487192559a7d09589c3a4f49905e65adb79",
+    "scripts/guardrails/check-markdown.ps1":
+      "51a3ac1537fb3c160e8441d3f213286525e14ad0941a68c2db50869a0fd13b5f",
+    "scripts/guardrails/detect-secrets.ps1":
+      "5589897d460e02cbcd8064756338367cc7eb56c7de279aa9bfc992d5465a26bf",
+    "scripts/guardrails/guard-tests.ps1":
+      "449c541a19b14b9cbb4fc10e49f1317d6a65dc8abff1c6da40999b4d778431c8",
+    "scripts/guardrails/protect-main.ps1":
+      "53a83c27a71844172d4bd45fe25ecff2718b7cb0d63153671465ea555b939b32",
+    "scripts/guardrails/run-tests.ps1":
+      "b7a2c1173855daf57704fb45c481f6cdb7e5414810171c6bae746257a78e20c0",
+    "scripts/guardrails/verify-governance.ps1":
+      "d730fd9526331a7afa5675ed5406108308828af47d9b7a5e1edc264fce2d25b9",
+    ".claude/settings.json":
+      "ad0a173f861f003c249ef08210e67fa9bd696f6316838a0c49eeba707bf7e4b8",
+    ".gemini/settings.json":
+      "69e6311ed094b0d0623cb1133a56c422a336355499a206395c87e7ccc2801ce7",
+    ".codex/config.toml":
+      "5a30bd9e70d4d235775df23ef32e17963f2670eab4db9f942c79979c1c98db7a"
+  }
+}
