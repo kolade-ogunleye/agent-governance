@@ -4,6 +4,10 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 ## Unreleased
 
+### Security
+
+- Bash guard: nested shell payloads are now inspected when `cmd.exe` takes slash switches before `/c` (`cmd.exe /d /s /c "..."`) and when a double-quoted payload contains escaped quotes (`\"` or PowerShell `` `" ``), which previously ended the capture early and hid the rest of the command. The guard's accepted-miss note now names the hub ADR, which downstream repositories do not carry. The policy eval adds 3 blocked and 2 allowed scenarios (42 blocked / 23 allowed / 2 accepted misses).
+
 ## 1.3.0 - 2026-10-01
 
 ### Security

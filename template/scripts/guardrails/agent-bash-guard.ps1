@@ -2,7 +2,7 @@
 # Claude Code PreToolUse hook (Bash / PowerShell tools): blocks commands that bypass or disable governance guardrails.
 # Exit 2 blocks the tool call and shows stderr to the agent; exit 1 is a non-blocking hook error.
 # Best-effort string check: it inspects the command text the agent wrote, not what a program will do at run time.
-# Accepted misses (documented in docs/adr/0003-command-guard-defence-in-depth.md): commands read from files or
+# Accepted misses (documented in the agent-governance hub, docs/adr/0003-command-guard-defence-in-depth.md): commands read from files or
 # generated at run time, and shell variables expanded by the shell. The native permissions.deny rules in
 # .claude/settings.json match the same text independently, and the server-side gate remains the backstop.
 
@@ -39,10 +39,14 @@ function ConvertTo-InspectableText {
 $stripped = Get-TextWithoutHeredocBody -Text $command
 $texts = [System.Collections.Generic.List[string]]::new()
 $texts.Add((ConvertTo-InspectableText -Text $stripped))
-# Commands handed to a nested shell (sh -c "...", pwsh -Command "...", eval "...") are inspected as commands.
-$nested = '(?s)\b(?:sh|bash|zsh|dash|ksh|busybox|pwsh|powershell|cmd)(?:\.exe)?\b(?:\s+-[^\s"'']*)*?\s+(?:-[A-Za-z]*c|-Command|-e|/c)\s*(["''])(.*?)\1|\beval\s+(["''])(.*?)\3'
+# Commands handed to a nested shell (sh -c "...", pwsh -Command "...", cmd /d /s /c "...", eval "...") are inspected
+# as commands. Switches before the command flag may use - or / (cmd.exe). A double-quoted payload ends at the first
+# unescaped quote (backslash, or PowerShell backtick), so an escaped quote cannot end it early and hide the rest; the
+# escapes are then removed so the payload reads as the nested shell will run it.
+$quoted = '(?:"(?<dq>(?:[^"\\`]|[\\`].)*)"|''(?<sq>[^'']*)'')'
+$nested = '(?s)\b(?:sh|bash|zsh|dash|ksh|busybox|pwsh|powershell|cmd)(?:\.exe)?\b(?:\s+[-/][^\s"'']*)*?\s+(?:-[A-Za-z]*c|-Command|-e|/c)\s*' + $quoted + '|\beval\s+' + $quoted
 foreach ($m in [regex]::Matches($stripped, $nested)) {
-    $inner = if ($m.Groups[2].Success) { $m.Groups[2].Value } else { $m.Groups[4].Value }
+    $inner = if ($m.Groups['dq'].Success) { $m.Groups['dq'].Value -replace '[\\`](["''\\$`])', '$1' } else { $m.Groups['sq'].Value }
     if ($inner) { $texts.Add((ConvertTo-InspectableText -Text (Get-TextWithoutHeredocBody -Text $inner))) }
 }
 
