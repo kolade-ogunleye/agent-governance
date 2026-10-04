@@ -2,7 +2,7 @@
 # Claude Code PreToolUse hook (Bash / PowerShell tools): blocks commands that bypass or disable governance guardrails.
 # Exit 2 blocks the tool call and shows stderr to the agent; exit 1 is a non-blocking hook error.
 # Best-effort string check: it inspects the command text the agent wrote, not what a program will do at run time.
-# Accepted misses (documented in docs/adr/0003-command-guard-defence-in-depth.md): commands read from files or
+# Accepted misses (documented in the agent-governance hub, docs/adr/0003-command-guard-defence-in-depth.md): commands read from files or
 # generated at run time, and shell variables expanded by the shell. The native permissions.deny rules in
 # .claude/settings.json match the same text independently, and the server-side gate remains the backstop.
 
@@ -32,19 +32,43 @@ function ConvertTo-InspectableText {
     # echo arguments) and is blanked so flags merely mentioned in it are not counted, unless it embeds a command
     # substitution: "$(git rev-parse --git-dir)/hooks/x" is a path, and its inner command runs.
     $unquote = { param($m) $inner = $m.Groups[1].Value; if ($inner -match '^[^\s;&|]*$' -or $inner -match '\$\(|`') { $inner } else { '""' } }
-    $text = [regex]::Replace($Text, '"((?:[^"\\]|\\.)*)"', $unquote)
-    return [regex]::Replace($text, "'([^']*)'", $unquote)
+    # A backslash-escaped quote outside quotes is a literal character, not the start of a quoted string.
+    $text = [regex]::Replace($Text, '(?<!\\)"((?:[^"\\]|\\.)*)"', $unquote)
+    return [regex]::Replace($text, "(?<!\\)'([^']*)'", $unquote)
 }
 
 $stripped = Get-TextWithoutHeredocBody -Text $command
 $texts = [System.Collections.Generic.List[string]]::new()
 $texts.Add((ConvertTo-InspectableText -Text $stripped))
-# Commands handed to a nested shell (sh -c "...", pwsh -Command "...", eval "...") are inspected as commands.
-$nested = '(?s)\b(?:sh|bash|zsh|dash|ksh|busybox|pwsh|powershell|cmd)(?:\.exe)?\b(?:\s+-[^\s"'']*)*?\s+(?:-[A-Za-z]*c|-Command|-e|/c)\s*(["''])(.*?)\1|\beval\s+(["''])(.*?)\3'
-foreach ($m in [regex]::Matches($stripped, $nested)) {
-    $inner = if ($m.Groups[2].Success) { $m.Groups[2].Value } else { $m.Groups[4].Value }
-    if ($inner) { $texts.Add((ConvertTo-InspectableText -Text (Get-TextWithoutHeredocBody -Text $inner))) }
+
+# Commands handed to a nested shell (sh -c "...", pwsh -Command "...", cmd /d /s /c "...", eval "...") are inspected
+# as commands. Only cmd takes /-switches (a / after another shell is a script path, whose -c is the script's own
+# argument). A double-quoted payload ends at the first unescaped quote, so an escaped quote cannot end it early and
+# hide the rest; then only the escapes the shell itself removes are removed (bash: \" \\ \$ \`; PowerShell: `" `' `$
+# ``). Bash keeps \' inside double quotes, and so does this.
+$quoted = '(?:"(?<dq>(?:[^"\\`]|[\\`].)*)"|''(?<sq>[^'']*)'')'
+$nested = '(?s)(?:\b(?:sh|bash|zsh|dash|ksh|busybox|pwsh|powershell)(?:\.exe)?\b(?:\s+-[^\s"'']*)*?\s+(?:-[A-Za-z]*c|-Command|-e)' +
+    '|(?i:\bcmd(?:\.exe)?\b(?:\s+/[^\s"'']*)*?\s+/c)|\beval)\s*' + $quoted
+# Quoted prose (a commit message, an echo argument) only mentions commands; a nested shell named inside it does not
+# run. Quoted text with a command substitution does run, so it is not prose.
+$prose = '(?<!\\)"(?:[^"\\]|\\.)*"|(?<!\\)''[^'']*'''
+
+function Get-NestedCommand {
+    [OutputType([string])]
+    param([Parameter(Mandatory = $true)][string]$Text, [int]$Depth = 0)
+    $spans = @([regex]::Matches($Text, $prose) | Where-Object { $_.Value -notmatch '\$\(|`' })
+    foreach ($m in [regex]::Matches($Text, $nested)) {
+        if (@($spans | Where-Object { $m.Index -gt $_.Index -and $m.Index -lt ($_.Index + $_.Length) }).Count -gt 0) { continue }
+        $inner = if ($m.Groups['dq'].Success) { $m.Groups['dq'].Value -replace '\\(["\\$`])', '$1' -replace '`(["''$`])', '$1' } else { $m.Groups['sq'].Value }
+        if (-not $inner) { continue }
+        $inner = Get-TextWithoutHeredocBody -Text $inner
+        $inner
+        # A nested shell inside a nested shell; the depth bound keeps a pathological command cheap.
+        if ($Depth -lt 3) { Get-NestedCommand -Text $inner -Depth ($Depth + 1) }
+    }
 }
+
+foreach ($inner in @(Get-NestedCommand -Text $stripped)) { $texts.Add((ConvertTo-InspectableText -Text $inner)) }
 
 # One shell segment: stops at command separators and pipes.
 $seg = '[^;&|\n]*'
