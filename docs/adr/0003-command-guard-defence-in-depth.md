@@ -31,6 +31,6 @@ A text check sees what the agent wrote, not what a program does at run time. The
 
 ## Consequences
 
-- Catch rate on the enlarged catalogue is 36/36 with 0/18 false positives.
+- Catch rate on the enlarged catalogue is 36/36 with 0/18 false positives (at the time of this decision; the README's Measuring Compliance section carries the current figures).
 - A one-word quoted commit message that is itself a blocked flag (`-m "--no-verify"`) is now blocked; ordinary messages that mention a flag in prose are still allowed.
 - The deny rules make Claude Code refuse the command before the hook runs, so the agent sees Claude Code's permission message instead of the guard's explanation for those forms.

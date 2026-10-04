@@ -14,6 +14,14 @@ Describe 'Policy-coverage eval (deterministic)' {
         $summary.FalsePositiveRate | Should -Be 0
     }
 
+    It 'keeps the README figures equal to the live eval result (no stale documented numbers)' {
+        $report = Join-Path $TestDrive 'policy-eval-readme.json'
+        & pwsh -NoProfile -File (Join-Path $EvalsDir 'Invoke-PolicyEval.ps1') -OutputPath $report *> $null
+        $summary = (Get-Content $report -Raw | ConvertFrom-Json).Summary
+        $readme = Get-Content (Join-Path $PSScriptRoot '..' 'README.md') -Raw
+        $readme | Should -Match ([regex]::Escape("Current result: $($summary.Caught) forbidden actions blocked, $($summary.FalsePositives) false positives, and $($summary.AcceptedMisses) documented accepted misses"))
+    }
+
     It 'covers both a blocked and an allowed scenario for layer <_>' -ForEach @('bash-guard', 'protect-main', 'detect-secrets', 'guard-tests') {
         $scenarios = (Get-Content (Join-Path $EvalsDir 'policy-scenarios.json') -Raw | ConvertFrom-Json).scenarios | Where-Object layer -eq $_
         @($scenarios | Where-Object expect -eq 'block').Count | Should -BeGreaterThan 0
