@@ -4,6 +4,10 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 ## Unreleased
 
+### Fixed
+
+- Downstream sync with the GitHub App: the installation token now requests `workflows: write`, and the runbook lists the Workflows permission. Without it GitHub refuses every sync push, because each sync updates the pinned gate in `.github/workflows/agent-governance.yml`.
+
 ### Security
 
 - Governance gate: the required `integrity` check now fails when a governed repository cannot fetch its hub (for example, a missing or expired `AGENT_GOVERNANCE_HUB_TOKEN` for a private hub). It previously logged a warning, skipped verification and still reported success.
