@@ -4,7 +4,7 @@ Three steps are deliberately not automated by the hub: two need a human's admini
 
 ## A. Machine-level Claude Code policy (every workstation)
 
-The installer renders `managed/claude-code-managed-settings.json` with the absolute path of this hub's Bash guard and writes it to the managed-settings location, which only an administrator can write. Keep the hub clone where it is afterwards: the policy points at that path.
+The installer copies this hub's Bash guard into the managed-settings directory, renders `managed/claude-code-managed-settings.json` with the absolute path of that copy, and writes it beside the guard. Only an administrator can write that directory, so neither the policy nor the guard it runs can be changed by an agent or by anything running as you. A guard change in the hub reaches this machine only when you re-run the installer elevated; do that after each hub release that changes `template/scripts/guardrails/agent-bash-guard.ps1`.
 
 | Platform    | Command (from the hub clone)                                                       |
 | :---------- | :--------------------------------------------------------------------------------- |
@@ -14,7 +14,7 @@ The installer renders `managed/claude-code-managed-settings.json` with the absol
 
 Preview with `-WhatIf`, remove with `-Remove`. Verify inside Claude Code with `/status`: the `Setting sources` line names the managed file. On WSL2, Windows-side policy takes precedence when both exist (`wslInheritsWindowsSettings`), so install on the side where Claude Code runs.
 
-What the policy enforces that a project file cannot: bypass mode is off, the deny rules and the guard hook cannot be removed by `.claude/settings.local.json`, and the guard runs from the hub's own copy rather than the repository's.
+What the policy enforces that a project file cannot: bypass mode is off, the deny rules and the guard hook cannot be removed by `.claude/settings.local.json`, and the guard runs from an administrator-only copy rather than the repository's or the hub clone's.
 
 ## B. GitHub App for the fleet sync (replaces the personal access token)
 
