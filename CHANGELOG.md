@@ -6,8 +6,13 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 ### Security
 
+- Bash guard: quoting is parsed per shell, from the hook's `tool_name` and from each nested shell's name. Single-quoted text no longer counts as a command substitution, and PowerShell backticks count as escapes rather than substitutions, so prose such as `git commit -m 'Document $(...)'` or a `Write-Host` string with an escaped newline is no longer blocked; `$(...)` and bash backticks inside double quotes are still inspected. Policy eval: +2 blocked, +3 allowed (47 blocked / 28 allowed / 2 accepted misses). Raised by review on homelab #22 and infosec #47.
 - Pre-push audit: reviewed, expiring exceptions for npm advisories that have no fixed release (`.audit-exceptions.json`: GHSA id, reason, expiry at most 90 days ahead). Excepted advisories are still reported on every push; malformed or expired entries, unattributable npm failures and every advisory without an entry block. Repositories without the file behave as before.
 - Bash guard: nested shell payloads are now inspected when `cmd.exe` takes slash switches before `/c` (`cmd.exe /d /s /c "..."`) and when a double-quoted payload contains escaped quotes (`\"` or PowerShell `` `" ``), which previously ended the capture early and hid the rest of the command. Only the escapes the target shell removes are decoded (bash keeps `'` inside double quotes), `/` switches apply to `cmd` only (case-insensitive), nested shells named inside quoted prose such as a commit message are ignored, and a nested shell inside a nested shell is inspected. The guard's accepted-miss note now names the hub ADR, which downstream repositories do not carry. The policy eval adds 6 blocked and 4 allowed scenarios (45 blocked / 25 allowed / 2 accepted misses).
+
+### Documentation
+
+- README: per-repository sandbox hosts go in `.claude/settings.local.json` (list settings merge across files), keeping the managed `.claude/settings.json` unmodified.
 
 ## 1.3.0 - 2026-10-01
 
