@@ -557,7 +557,7 @@ exit [int]$env:NPM_SHIM_EXIT
             [System.IO.File]::WriteAllText($env:NPM_SHIM_JSON, $BracesReport)
             [System.IO.File]::WriteAllText((Join-Path $Repo 'package.json'), '{ "name": "fixture" }')
             [System.IO.File]::WriteAllText((Join-Path $Repo 'package-lock.json'), '{ "lockfileVersion": 3 }')
-            function Set-AuditException {
+            function Write-AuditExceptionFixture {
                 param([string]$Json)
                 [System.IO.File]::WriteAllText((Join-Path $Repo '.audit-exceptions.json'), $Json)
             }
@@ -568,7 +568,7 @@ exit [int]$env:NPM_SHIM_EXIT
         }
 
         It 'passes when every high or critical advisory has a current exception, and still reports it' {
-            Set-AuditException "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"No fixed release`", `"expires`": `"$InExpiry`" } ] }"
+            Write-AuditExceptionFixture "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"No fixed release`", `"expires`": `"$InExpiry`" } ] }"
             $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
             $result.ExitCode | Should -Be 0
             $result.Output | Should -Match 'Audit EXCEPTION\] braces \(high\).*excepted until'
@@ -576,7 +576,7 @@ exit [int]$env:NPM_SHIM_EXIT
         }
 
         It 'blocks an advisory that no exception covers' {
-            Set-AuditException "{ `"exceptions`": [ { `"id`": `"GHSA-2222-3333-4444`", `"reason`": `"other`", `"expires`": `"$InExpiry`" } ] }"
+            Write-AuditExceptionFixture "{ `"exceptions`": [ { `"id`": `"GHSA-2222-3333-4444`", `"reason`": `"other`", `"expires`": `"$InExpiry`" } ] }"
             $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
             $result.ExitCode | Should -Be 1
             $result.Output | Should -Match 'braces \(high\).*GHSA-vfj7-8cjw-p6xm'
@@ -587,7 +587,7 @@ exit [int]$env:NPM_SHIM_EXIT
             @{ Case = 'is more than 90 days ahead'; Expires = '2099-01-01'; Message = 'more than 90 days ahead' }
             @{ Case = 'has a malformed date'; Expires = '31/10/2026'; Message = 'no expires date' }
         ) {
-            Set-AuditException "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"r`", `"expires`": `"$Expires`" } ] }"
+            Write-AuditExceptionFixture "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"r`", `"expires`": `"$Expires`" } ] }"
             $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
             $result.ExitCode | Should -Be 1
             $result.Output | Should -Match ([regex]::Escape($Message))
@@ -598,7 +598,7 @@ exit [int]$env:NPM_SHIM_EXIT
             @{ Json = "{ `"exceptions`": [ { `"id`": `"CVE-2024-1234`", `"reason`": `"r`", `"expires`": `"2026-10-31`" } ] }"; Message = 'not a GitHub advisory id' }
             @{ Json = '{ not json'; Message = 'not valid JSON' }
         ) {
-            Set-AuditException $Json
+            Write-AuditExceptionFixture $Json
             $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
             $result.ExitCode | Should -Be 1
             $result.Output | Should -Match $Message
@@ -609,7 +609,7 @@ exit [int]$env:NPM_SHIM_EXIT
             @{ Report = '{"error":{"code":"ENOTFOUND","summary":"request to registry failed"}}'; Message = 'request to registry failed' }
         ) {
             [System.IO.File]::WriteAllText($env:NPM_SHIM_JSON, $Report)
-            Set-AuditException "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"r`", `"expires`": `"$InExpiry`" } ] }"
+            Write-AuditExceptionFixture "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"r`", `"expires`": `"$InExpiry`" } ] }"
             $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
             $result.ExitCode | Should -Be 1
             $result.Output | Should -Match $Message
