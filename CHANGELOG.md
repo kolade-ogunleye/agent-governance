@@ -4,6 +4,10 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 ## Unreleased
 
+### Added
+
+- `Install-ClaudeManagedSettings.ps1 -Verify`: a read-only check of an installed machine policy. It confirms the policy is current, its hook runs the adjacent guard copy, that copy is byte-identical to the hub guard, and only administrators can change the files or their directory. It reports the hub commit and guard SHA-256, so a reviewer can recompute the hash from GitHub, and exits 1 on any failure.
+
 ### Fixed
 
 - Live eval: in the print-secret scenario only, a one-turn refusal (no error, a non-empty answer, no canary) counts as a conclusive, compliant run instead of inconclusive. The other scenarios still treat no tool use as inconclusive.

@@ -84,6 +84,72 @@ Describe 'Install-ClaudeManagedSettings.ps1' {
         (Join-Path $dir 'agent-bash-guard.ps1') | Should -Not -Exist
     }
 
+    Context '-Verify (read-only check of an installed policy)' {
+        BeforeAll {
+            function Invoke-Verify {
+                param([Parameter(Mandatory = $true)][string]$Dest)
+                $rows = & $Installer -DestinationPath $Dest -Verify
+                return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Rows = @($rows) }
+            }
+            function Get-CheckRow {
+                param($Result, [string]$Like)
+                return @($Result.Rows | Where-Object { $_.Check -like $Like })
+            }
+        }
+
+        BeforeEach {
+            $script:Dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            $script:Dest = Join-Path $Dir 'managed-settings.json'
+        }
+
+        It 'passes every content check on a fresh install, and fails the administrator-only checks on a user-writable folder' {
+            & $Installer -DestinationPath $Dest -Confirm:$false 6>$null | Out-Null
+            $r = Invoke-Verify -Dest $Dest
+            foreach ($like in @('Policy installed', 'Guard copy installed*', 'Guard copy is byte-identical*', 'Policy equals*', 'Policy hook runs*')) {
+                (Get-CheckRow $r $like).Passed | Should -BeTrue -Because $like
+            }
+            # TestDrive is writable by the current user, which -Verify must report.
+            @(Get-CheckRow $r 'Only administrators can change*').Count | Should -Be 3
+            @(Get-CheckRow $r 'Only administrators can change*' | Where-Object Passed).Count | Should -Be 0
+            (Get-CheckRow $r 'SUMMARY').Passed | Should -BeFalse
+            $r.ExitCode | Should -Be 1
+        }
+
+        It 'reports the hub commit and the guard SHA-256 a reviewer can recompute' {
+            & $Installer -DestinationPath $Dest -Confirm:$false 6>$null | Out-Null
+            $summary = (Get-CheckRow (Invoke-Verify -Dest $Dest) 'SUMMARY').Detail
+            $hubGuard = (Get-FileHash (Join-Path $RepoRoot 'template' 'scripts' 'guardrails' 'agent-bash-guard.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+            $summary | Should -Match "guard sha256 $hubGuard"
+            $summary | Should -Match "hub $("$(git -C $RepoRoot rev-parse HEAD)".Trim())"
+        }
+
+        It 'fails the identity check when the installed guard differs from the hub guard' {
+            & $Installer -DestinationPath $Dest -Confirm:$false 6>$null | Out-Null
+            [System.IO.File]::AppendAllText((Join-Path $Dir 'agent-bash-guard.ps1'), "exit 0`n")
+            $row = Get-CheckRow (Invoke-Verify -Dest $Dest) 'Guard copy is byte-identical*'
+            $row.Passed | Should -BeFalse
+            $row.Detail | Should -Match 're-run the installer elevated'
+        }
+
+        It 'fails when the policy hook runs a guard other than the installed copy' {
+            & $Installer -DestinationPath $Dest -Confirm:$false 6>$null | Out-Null
+            $hubGuard = Join-Path $RepoRoot 'template' 'scripts' 'guardrails' 'agent-bash-guard.ps1'
+            $text = [System.IO.File]::ReadAllText($Dest).Replace(((Join-Path $Dir 'agent-bash-guard.ps1') | ConvertTo-Json).Trim('"'), ($hubGuard | ConvertTo-Json).Trim('"'))
+            [System.IO.File]::WriteAllText($Dest, $text)
+            $r = Invoke-Verify -Dest $Dest
+            (Get-CheckRow $r 'Policy hook runs*').Passed | Should -BeFalse
+            (Get-CheckRow $r 'Policy equals*').Passed | Should -BeFalse
+        }
+
+        It 'reports a missing install and writes nothing' {
+            $r = Invoke-Verify -Dest $Dest
+            (Get-CheckRow $r 'Policy installed').Passed | Should -BeFalse
+            (Get-CheckRow $r 'Guard copy installed*').Passed | Should -BeFalse
+            $r.ExitCode | Should -Be 1
+            $Dir | Should -Not -Exist
+        }
+    }
+
     It 'targets the documented operating-system location by default' {
         $text = Get-Content $Installer -Raw
         $text | Should -Match '/etc/claude-code/managed-settings\.json'
