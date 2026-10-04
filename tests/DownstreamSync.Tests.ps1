@@ -177,6 +177,11 @@ Describe 'Downstream sync workflow and fleet list' {
         $script:Fleet = Get-Content (Join-Path $HubRoot 'fleet.json') -Raw | ConvertFrom-Json
     }
 
+    It 'mints the sync App token with workflows: write, since every sync updates the pinned gate workflow' {
+        $syncMint = [regex]::Match($Workflow, '(?s)permission-contents: write.*?permission-metadata: read').Value
+        $syncMint | Should -Match 'permission-workflows: write'
+    }
+
     It 'lists owner/name repositories only' {
         @($Fleet.repositories).Count | Should -BeGreaterThan 0
         foreach ($r in $Fleet.repositories) { $r | Should -Match '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' }

@@ -63,6 +63,9 @@ jobs:
           repositories: ${{ matrix.repository.name }}
           # Least privilege: the token carries only what this job uses, whatever the installation holds.
           permission-contents: write
+          # Every sync updates the pinned gate in .github/workflows/agent-governance.yml; GitHub refuses a push
+          # that changes a workflow file without this permission.
+          permission-workflows: write
           permission-pull-requests: write
           permission-issues: write
           permission-administration: write
