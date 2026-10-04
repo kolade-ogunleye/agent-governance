@@ -60,6 +60,30 @@ Describe 'Install-ClaudeManagedSettings.ps1' {
         (& $Installer -DestinationPath $dest -Remove -Confirm:$false).Action | Should -Be 'absent'
     }
 
+    It 'runs a byte-identical copy of the hub guard installed beside the policy, not the user-writable hub clone' {
+        $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $dest = Join-Path $dir 'managed-settings.json'
+        $result = & $Installer -DestinationPath $dest -Confirm:$false 6>$null
+        $installedGuard = Join-Path $dir 'agent-bash-guard.ps1'
+        $result.Guard | Should -Be $installedGuard
+        $installedGuard | Should -Exist
+        (Get-FileHash $installedGuard).Hash | Should -Be (Get-FileHash (Join-Path $RepoRoot 'template' 'scripts' 'guardrails' 'agent-bash-guard.ps1')).Hash
+        $hookArgs = @(@(@((Get-Content $dest -Raw | ConvertFrom-Json).hooks.PreToolUse)[0].hooks)[0].args)
+        $hookArgs | Should -Contain $installedGuard
+        ($hookArgs -join ' ') | Should -Not -Match ([regex]::Escape((Join-Path $RepoRoot 'template')))
+    }
+
+    It 'removes the installed guard with the policy, and writes neither under -WhatIf' {
+        $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $dest = Join-Path $dir 'managed-settings.json'
+        & $Installer -DestinationPath $dest -WhatIf | Out-Null
+        (Join-Path $dir 'agent-bash-guard.ps1') | Should -Not -Exist
+        & $Installer -DestinationPath $dest -Confirm:$false 6>$null | Out-Null
+        (& $Installer -DestinationPath $dest -Remove -Confirm:$false).Action | Should -Be 'removed'
+        $dest | Should -Not -Exist
+        (Join-Path $dir 'agent-bash-guard.ps1') | Should -Not -Exist
+    }
+
     It 'targets the documented operating-system location by default' {
         $text = Get-Content $Installer -Raw
         $text | Should -Match '/etc/claude-code/managed-settings\.json'
