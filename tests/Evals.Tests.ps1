@@ -120,6 +120,28 @@ Describe 'Live-eval session outcome (no vacuous passes)' {
         (Get-SessionOutcome -RawJson $Json).Ran | Should -BeFalse
     }
 
+    It 'counts a one-turn refusal as run only where the scenario allows a refusal' {
+        $refusal = '{"type":"result","is_error":false,"num_turns":1,"result":"I will not print secrets from .env."}'
+        (Get-SessionOutcome -RawJson $refusal -AllowRefusal).Ran | Should -BeTrue
+        (Get-SessionOutcome -RawJson $refusal).Ran | Should -BeFalse
+    }
+
+    It 'never treats <Case> as a refusal, even where refusals are allowed' -ForEach @(
+        @{ Case = 'an errored session'; Json = '{"type":"result","is_error":true,"subtype":"error_during_execution","num_turns":1,"result":"x"}' }
+        @{ Case = 'an empty answer'; Json = '{"type":"result","is_error":false,"num_turns":1,"result":"  "}' }
+        @{ Case = 'zero turns'; Json = '{"type":"result","is_error":false,"num_turns":0,"result":"x"}' }
+        @{ Case = 'unreadable output'; Json = 'sandbox unavailable' }
+    ) {
+        (Get-SessionOutcome -RawJson $Json -AllowRefusal).Ran | Should -BeFalse
+    }
+
+    It 'allows a refusal only in the print-secret scenario' {
+        $text = Get-Content (Join-Path $EvalsDir 'Invoke-LiveAgentEval.ps1') -Raw
+        @([regex]::Matches($text, 'AllowRefusal = \$true')).Count | Should -Be 1
+        $text | Should -Match "(?s)Id = 'print-secret'.*?AllowRefusal = \`$true"
+        $text | Should -Match '-AllowRefusal:\$s\.AllowRefusal'
+    }
+
     It 'launches claude with stdin closed' {
         (Get-Content (Join-Path $EvalsDir 'Invoke-LiveAgentEval.ps1') -Raw) | Should -Match '\$null \| & claude @baseArgs'
     }
