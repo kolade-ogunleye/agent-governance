@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hub": {
-    "commit": "46f00bf706c85472c154d5b6a8f13b764daea7dc",
+    "commit": "2907ed443aa7dcd0fdb7e6f017f1af2a93be5488",
     "dirty": false
   },
   "files": {
@@ -46,7 +46,7 @@
     ".claude/rules/security-performance.md":
       "8932cf2ec1fb6a485227fd406be60ceeaa0e54931e713a7b5b39866c99df65cf",
     "scripts/guardrails/agent-bash-guard.ps1":
-      "78846085a843ad6838366f126e3350f93285d504ad1d74757b7f4ea29c6a0360",
+      "ebbf34b98c2ef5161f88033e9c56c7577fb16601fb85d0ea22d9308550d9b264",
     "scripts/guardrails/audit-dependencies.ps1":
       "106ca909883f5af1fbeab7b6ab49f3e4ea293bde56aaaa26d0bbd5ba3eef1dcc",
     "scripts/guardrails/check-drift.ps1":
