@@ -11,6 +11,8 @@ $ErrorActionPreference = 'Stop'
 try {
     $payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $command = [string]$payload.tool_input.command
+    # The hook serves the Bash and PowerShell tools, whose quoting rules differ.
+    $toolShell = if ([string]$payload.tool_name -eq 'PowerShell') { 'PowerShell' } else { 'Bash' }
 } catch {
     [Console]::Error.WriteLine("agent-bash-guard: unreadable hook payload: $($_.Exception.Message)")
     exit 1
@@ -24,51 +26,64 @@ function Get-TextWithoutHeredocBody {
     return ($Text -replace '(?s)<<-?\s*([''"]?)(\w+)\1(?<line>[^\n]*)\n.*?\n[ \t]*\2[ \t]*(?=\n|$)', '<<$2${line}')
 }
 
+# Which text inside double quotes runs as a command substitution, per shell. Single-quoted text never runs one in
+# bash or PowerShell; cmd has no command substitution; a PowerShell backtick is an escape character, not `...`.
+$substitution = @{ Bash = '\$\(|`'; PowerShell = '\$\('; Cmd = '(?!)' }
+
 function ConvertTo-InspectableText {
     [OutputType([string])]
-    param([Parameter(Mandatory = $true)][string]$Text)
+    param([Parameter(Mandatory = $true)][string]$Text, [Parameter(Mandatory = $true)][string]$Shell)
     # A quoted single word keeps its content: quotes do not change what reaches git ('--no-verify' is the flag),
     # so they must not hide it from the matcher. Quoted text containing whitespace is prose (commit messages,
-    # echo arguments) and is blanked so flags merely mentioned in it are not counted, unless it embeds a command
-    # substitution: "$(git rev-parse --git-dir)/hooks/x" is a path, and its inner command runs.
-    $unquote = { param($m) $inner = $m.Groups[1].Value; if ($inner -match '^[^\s;&|]*$' -or $inner -match '\$\(|`') { $inner } else { '""' } }
+    # echo arguments) and is blanked so flags merely mentioned in it are not counted, unless it is double-quoted and
+    # embeds a command substitution: "$(git rev-parse --git-dir)/hooks/x" is a path, and its inner command runs.
+    $runs = $substitution[$Shell]
+    $double = { param($m) $inner = $m.Groups[1].Value; if ($inner -match '^[^\s;&|]*$' -or $inner -match $runs) { $inner } else { '""' } }
+    $single = { param($m) $inner = $m.Groups[1].Value; if ($inner -match '^[^\s;&|]*$') { $inner } else { '""' } }
     # A backslash-escaped quote outside quotes is a literal character, not the start of a quoted string.
-    $text = [regex]::Replace($Text, '(?<!\\)"((?:[^"\\]|\\.)*)"', $unquote)
-    return [regex]::Replace($text, "(?<!\\)'([^']*)'", $unquote)
+    $text = [regex]::Replace($Text, '(?<!\\)"((?:[^"\\]|\\.)*)"', $double)
+    return [regex]::Replace($text, "(?<!\\)'([^']*)'", $single)
 }
 
 $stripped = Get-TextWithoutHeredocBody -Text $command
 $texts = [System.Collections.Generic.List[string]]::new()
-$texts.Add((ConvertTo-InspectableText -Text $stripped))
+$texts.Add((ConvertTo-InspectableText -Text $stripped -Shell $toolShell))
 
 # Commands handed to a nested shell (sh -c "...", pwsh -Command "...", cmd /d /s /c "...", eval "...") are inspected
-# as commands. Only cmd takes /-switches (a / after another shell is a script path, whose -c is the script's own
-# argument). A double-quoted payload ends at the first unescaped quote, so an escaped quote cannot end it early and
-# hide the rest; then only the escapes the shell itself removes are removed (bash: \" \\ \$ \`; PowerShell: `" `' `$
-# ``). Bash keeps \' inside double quotes, and so does this.
+# as commands, with the nested shell's own quoting rules. Only cmd takes /-switches (a / after another shell is a
+# script path, whose -c is the script's own argument). A double-quoted payload ends at the first unescaped quote, so
+# an escaped quote cannot end it early and hide the rest; then only the escapes a shell removes are removed (bash:
+# \" \\ \$ \`; PowerShell: `" `' `$ ``). Bash keeps \' inside double quotes, and so does this.
 $quoted = '(?:"(?<dq>(?:[^"\\`]|[\\`].)*)"|''(?<sq>[^'']*)'')'
-$nested = '(?s)(?:\b(?:sh|bash|zsh|dash|ksh|busybox|pwsh|powershell)(?:\.exe)?\b(?:\s+-[^\s"'']*)*?\s+(?:-[A-Za-z]*c|-Command|-e)' +
-    '|(?i:\bcmd(?:\.exe)?\b(?:\s+/[^\s"'']*)*?\s+/c)|\beval)\s*' + $quoted
-# Quoted prose (a commit message, an echo argument) only mentions commands; a nested shell named inside it does not
-# run. Quoted text with a command substitution does run, so it is not prose.
-$prose = '(?<!\\)"(?:[^"\\]|\\.)*"|(?<!\\)''[^'']*'''
+$nested = '(?s)(?:\b(?<sh>sh|bash|zsh|dash|ksh|busybox|pwsh|powershell)(?:\.exe)?\b(?:\s+-[^\s"'']*)*?\s+(?:-[A-Za-z]*c|-Command|-e)' +
+    '|(?i:\b(?<sh>cmd)(?:\.exe)?\b(?:\s+/[^\s"'']*)*?\s+/c)|\b(?<sh>eval))\s*' + $quoted
 
 function Get-NestedCommand {
-    [OutputType([string])]
-    param([Parameter(Mandatory = $true)][string]$Text, [int]$Depth = 0)
-    $spans = @([regex]::Matches($Text, $prose) | Where-Object { $_.Value -notmatch '\$\(|`' })
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory = $true)][string]$Text, [Parameter(Mandatory = $true)][string]$Shell, [int]$Depth = 0)
+    # Quoted prose (a commit message, an echo argument) only mentions commands: a nested shell named inside it does
+    # not run. Double-quoted text with a command substitution (in this shell) does run, so it is not prose.
+    $runs = $substitution[$Shell]
+    $spans = @([regex]::Matches($Text, '(?<!\\)"(?:[^"\\]|\\.)*"') | Where-Object { $_.Value -notmatch $runs }) +
+        @([regex]::Matches($Text, "(?<!\\)'[^']*'"))
     foreach ($m in [regex]::Matches($Text, $nested)) {
         if (@($spans | Where-Object { $m.Index -gt $_.Index -and $m.Index -lt ($_.Index + $_.Length) }).Count -gt 0) { continue }
         $inner = if ($m.Groups['dq'].Success) { $m.Groups['dq'].Value -replace '\\(["\\$`])', '$1' -replace '`(["''$`])', '$1' } else { $m.Groups['sq'].Value }
         if (-not $inner) { continue }
+        $innerShell = switch -Regex ($m.Groups['sh'].Value) {
+            '^(?i:pwsh|powershell)$' { 'PowerShell' }
+            '^(?i:cmd)$' { 'Cmd' }
+            '^eval$' { $Shell }
+            default { 'Bash' }
+        }
         $inner = Get-TextWithoutHeredocBody -Text $inner
-        $inner
+        [pscustomobject]@{ Text = $inner; Shell = $innerShell }
         # A nested shell inside a nested shell; the depth bound keeps a pathological command cheap.
-        if ($Depth -lt 3) { Get-NestedCommand -Text $inner -Depth ($Depth + 1) }
+        if ($Depth -lt 3) { Get-NestedCommand -Text $inner -Shell $innerShell -Depth ($Depth + 1) }
     }
 }
 
-foreach ($inner in @(Get-NestedCommand -Text $stripped)) { $texts.Add((ConvertTo-InspectableText -Text $inner)) }
+foreach ($n in @(Get-NestedCommand -Text $stripped -Shell $toolShell)) { $texts.Add((ConvertTo-InspectableText -Text $n.Text -Shell $n.Shell)) }
 
 # One shell segment: stops at command separators and pipes.
 $seg = '[^;&|\n]*'
