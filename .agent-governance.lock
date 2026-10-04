@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hub": {
-    "commit": "46f00bf706c85472c154d5b6a8f13b764daea7dc",
+    "commit": "33990bfca8ab2fa07d7d0b405412c9449ebfc2c8",
     "dirty": false
   },
   "files": {
@@ -48,7 +48,7 @@
     "scripts/guardrails/agent-bash-guard.ps1":
       "78846085a843ad6838366f126e3350f93285d504ad1d74757b7f4ea29c6a0360",
     "scripts/guardrails/audit-dependencies.ps1":
-      "106ca909883f5af1fbeab7b6ab49f3e4ea293bde56aaaa26d0bbd5ba3eef1dcc",
+      "e65499f55bab2561bba6119a674a03c4f3e75aa9224e7fec915c550362d536e2",
     "scripts/guardrails/check-drift.ps1":
       "be5654c37d8db275a09403317119f487192559a7d09589c3a4f49905e65adb79",
     "scripts/guardrails/check-markdown.ps1":
