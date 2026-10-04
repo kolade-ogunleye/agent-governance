@@ -180,13 +180,16 @@ jobs:
           }
           Write-Host "Hub pin consistent; locked hub commit is $ageDays days old."
 
-      - name: Report an unreachable hub
+      - name: Fail on an unreachable hub
+        # Fail closed: a governed repository (it has a lock) whose hub cannot be fetched has not been verified, and
+        # a required check must not report success for a verification it skipped.
         if: steps.lock.outputs.present == 'true' && steps.lock.outputs.is_hub != 'true' && steps.hub.outcome != 'success'
         env:
           # Via env, never interpolated into the script, to prevent injection through the input.
           HUB_REPOSITORY: ${{ inputs.hub_repository }}
         run: |
-          echo "::warning::Could not fetch ${HUB_REPOSITORY} at the locked commit; integrity check skipped. Pass a read-only hub_token secret (private hub) and make sure the locked commit is pushed."
+          echo "::error::Could not fetch ${HUB_REPOSITORY} at the locked commit, so managed files were not verified. Set a read-only AGENT_GOVERNANCE_HUB_TOKEN secret (private hub: Contents read on the hub only) and make sure the locked commit is pushed."
+          exit 1
 
       - name: Verify managed files against the hub template
         if: steps.lock.outputs.present == 'true' && steps.lock.outputs.is_hub != 'true' && steps.hub.outcome == 'success'

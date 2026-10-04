@@ -522,6 +522,26 @@ Describe 'Claude Code settings template: native deny rules and sandbox hardening
     }
 }
 
+Describe 'Governance gate integrity fails closed on an unreachable hub' {
+    BeforeAll {
+        $script:GatePath = Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml'
+        $script:Gate = Get-Content $GatePath -Raw
+        $script:UnreachableStep = Join-Path $TestDrive 'unreachable.sh'
+        [System.IO.File]::WriteAllText($UnreachableStep, (Get-WorkflowStepScript -WorkflowPath $GatePath -StepName 'Fail on an unreachable hub'))
+    }
+
+    It 'fails the required check, with an error naming the missing token, when the hub cannot be fetched' {
+        $script = (Get-Content -LiteralPath $UnreachableStep -Raw) -split "`n" | Where-Object { $_.Trim() }
+        $script[0] | Should -Match '^echo "::error::Could not fetch \$\{HUB_REPOSITORY\} at the locked commit.*AGENT_GOVERNANCE_HUB_TOKEN'
+        $script[-1].Trim() | Should -BeExactly 'exit 1'
+    }
+
+    It 'runs exactly when a governed downstream repository could not fetch its hub' {
+        $Gate | Should -Match "- name: Fail on an unreachable hub\s+#[^\n]*\n(?:\s+#[^\n]*\n)*\s+if: steps\.lock\.outputs\.present == 'true' && steps\.lock\.outputs\.is_hub != 'true' && steps\.hub\.outcome != 'success'"
+        $Gate | Should -Not -Match '::warning::Could not fetch'
+    }
+}
+
 Describe 'Governance gate hub mode (the hub dogfoods its own lock)' {
     BeforeAll {
         $script:GatePath = Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml'
