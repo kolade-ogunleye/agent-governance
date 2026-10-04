@@ -522,6 +522,106 @@ Describe 'audit-dependencies.ps1' {
         Get-Content (Join-Path $Repo '.args-pnpm') -Raw | Should -Match '^audit --audit-level=high'
     }
 
+    Context 'expiring npm audit exceptions (.audit-exceptions.json)' {
+        BeforeAll {
+            # A scripted npm: prints the JSON in NPM_SHIM_JSON and exits NPM_SHIM_EXIT, recording its arguments. The
+            # report shape is real npm 11 output: an advisory object in the vulnerable package's "via", and a
+            # transitive dependant that names it as a string.
+            $script:NpmShimDir = Join-Path $TestDrive 'npm-shim'
+            New-Item -ItemType Directory -Path $NpmShimDir -Force | Out-Null
+            $impl = @'
+Add-Content -LiteralPath $env:NPM_SHIM_LOG -Value ($args -join ' ')
+if ($args -contains '--json') { Write-Output ([System.IO.File]::ReadAllText($env:NPM_SHIM_JSON)) }
+exit [int]$env:NPM_SHIM_EXIT
+'@
+            [System.IO.File]::WriteAllText((Join-Path $NpmShimDir 'npm-impl.ps1'), $impl)
+            if ($IsWindows) {
+                [System.IO.File]::WriteAllText((Join-Path $NpmShimDir 'npm.ps1'), "& '$((Join-Path $NpmShimDir 'npm-impl.ps1'))' @args`nexit `$LASTEXITCODE`n")
+            } else {
+                $sh = Join-Path $NpmShimDir 'npm'
+                [System.IO.File]::WriteAllText($sh, "#!/bin/sh`nexec pwsh -NoProfile -File '$((Join-Path $NpmShimDir 'npm-impl.ps1'))' `"`$@`"`n")
+                chmod +x $sh
+            }
+            $script:BracesReport = '{"auditReportVersion":2,"vulnerabilities":{' +
+                '"braces":{"name":"braces","severity":"high","via":[{"source":1240992,"name":"braces","severity":"high","url":"https://github.com/advisories/GHSA-vfj7-8cjw-p6xm"}]},' +
+                '"fast-glob":{"name":"fast-glob","severity":"high","via":["micromatch"]}},"metadata":{"vulnerabilities":{"high":2,"critical":0}}}'
+            $script:InExpiry = [datetime]::UtcNow.Date.AddDays(30).ToString('yyyy-MM-dd')
+        }
+
+        BeforeEach {
+            $script:SavedNpm = @{ PATH = $env:PATH; NPM_SHIM_JSON = $env:NPM_SHIM_JSON; NPM_SHIM_EXIT = $env:NPM_SHIM_EXIT; NPM_SHIM_LOG = $env:NPM_SHIM_LOG }
+            $env:PATH = $NpmShimDir + [System.IO.Path]::PathSeparator + $env:PATH
+            $env:NPM_SHIM_LOG = Join-Path $Repo '.args-npm-shim'
+            $env:NPM_SHIM_JSON = Join-Path $Repo '.npm-report.json'
+            $env:NPM_SHIM_EXIT = '1'
+            [System.IO.File]::WriteAllText($env:NPM_SHIM_JSON, $BracesReport)
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'package.json'), '{ "name": "fixture" }')
+            [System.IO.File]::WriteAllText((Join-Path $Repo 'package-lock.json'), '{ "lockfileVersion": 3 }')
+            function Write-AuditExceptionFixture {
+                param([string]$Json)
+                [System.IO.File]::WriteAllText((Join-Path $Repo '.audit-exceptions.json'), $Json)
+            }
+        }
+
+        AfterEach {
+            foreach ($k in $SavedNpm.Keys) { [Environment]::SetEnvironmentVariable($k, $SavedNpm[$k]) }
+        }
+
+        It 'passes when every high or critical advisory has a current exception, and still reports it' {
+            Write-AuditExceptionFixture "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"No fixed release`", `"expires`": `"$InExpiry`" } ] }"
+            $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'Audit EXCEPTION\] braces \(high\).*excepted until'
+            Get-Content $env:NPM_SHIM_LOG -Raw | Should -Match 'audit --json --audit-level=high'
+        }
+
+        It 'blocks an advisory that no exception covers' {
+            Write-AuditExceptionFixture "{ `"exceptions`": [ { `"id`": `"GHSA-2222-3333-4444`", `"reason`": `"other`", `"expires`": `"$InExpiry`" } ] }"
+            $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Match 'braces \(high\).*GHSA-vfj7-8cjw-p6xm'
+        }
+
+        It 'blocks when the exception <Case>' -ForEach @(
+            @{ Case = 'has expired'; Expires = '2020-01-01'; Message = 'expired on 2020-01-01' }
+            @{ Case = 'is more than 90 days ahead'; Expires = '2099-01-01'; Message = 'more than 90 days ahead' }
+            @{ Case = 'has a malformed date'; Expires = '31/10/2026'; Message = 'no expires date' }
+        ) {
+            Write-AuditExceptionFixture "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"r`", `"expires`": `"$Expires`" } ] }"
+            $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Match ([regex]::Escape($Message))
+        }
+
+        It 'blocks an exception without a reason, a non-GHSA id, or an unreadable file' -ForEach @(
+            @{ Json = "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"  `", `"expires`": `"2026-10-31`" } ] }"; Message = 'has no reason' }
+            @{ Json = "{ `"exceptions`": [ { `"id`": `"CVE-2024-1234`", `"reason`": `"r`", `"expires`": `"2026-10-31`" } ] }"; Message = 'not a GitHub advisory id' }
+            @{ Json = '{ not json'; Message = 'not valid JSON' }
+        ) {
+            Write-AuditExceptionFixture $Json
+            $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Match $Message
+        }
+
+        It 'blocks when npm audit itself fails (no readable report, or an error object)' -ForEach @(
+            @{ Report = 'npm ERR! network'; Message = 'no readable report' }
+            @{ Report = '{"error":{"code":"ENOTFOUND","summary":"request to registry failed"}}'; Message = 'request to registry failed' }
+        ) {
+            [System.IO.File]::WriteAllText($env:NPM_SHIM_JSON, $Report)
+            Write-AuditExceptionFixture "{ `"exceptions`": [ { `"id`": `"GHSA-vfj7-8cjw-p6xm`", `"reason`": `"r`", `"expires`": `"$InExpiry`" } ] }"
+            $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Match $Message
+        }
+
+        It 'leaves the human-readable npm audit unchanged when the repository has no exceptions file' {
+            $result = Invoke-Guardrail -ScriptPath $Guard -RepoPath $Repo
+            $result.ExitCode | Should -Be 1
+            (Get-Content $env:NPM_SHIM_LOG -Raw).Trim() | Should -BeExactly 'audit --audit-level=high'
+        }
+    }
+
     Context 'yarn, Go, and composer coverage' {
         BeforeEach {
             foreach ($tool in @('yarn', 'govulncheck', 'composer')) {

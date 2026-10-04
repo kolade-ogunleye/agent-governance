@@ -177,6 +177,21 @@ edits under `template/` as the content to mirror rather than as unrelated work.
 
 - Inspects repository manifests (`package.json`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `pyproject.toml`, `uv.lock`, `Cargo.toml`, `go.mod`, `ansible/`, `*.ps1`).
 - Tailors `PROJECT.md` runbooks and executes exact project-native package managers during supply-chain audits and test runs.
+- **Expiring audit exceptions (npm):** the pre-push audit blocks every high or critical advisory. When an advisory has no fixed release yet, the repository can commit a reviewed exception in `.audit-exceptions.json` instead of bypassing the hook:
+
+  ```json
+  {
+    "exceptions": [
+      {
+        "id": "GHSA-vfj7-8cjw-p6xm",
+        "reason": "No fixed braces release; dev-only via stylelint.",
+        "expires": "2026-10-31"
+      }
+    ]
+  }
+  ```
+
+  Each entry suppresses only that advisory, only until it expires (at most 90 days ahead), and is still printed on every push. A malformed or expired entry blocks the push, and so does any advisory without an entry. The file is repository-owned, so it appears in the pull request diff for review. pnpm, yarn and other ecosystems are not excepted yet.
 
 ### 5. Session Continuity & Write-Ahead Ledgers (`WORKING.md`)
 
