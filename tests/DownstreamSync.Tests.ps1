@@ -187,6 +187,11 @@ Describe 'Downstream sync workflow and fleet list' {
         foreach ($r in $Fleet.repositories) { $r | Should -Match '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' }
     }
 
+    It 'lists each repository once (GitHub names are case-insensitive)' {
+        $names = @($Fleet.repositories | ForEach-Object { $_.ToLowerInvariant() })
+        @($names | Sort-Object -Unique).Count | Should -Be $names.Count
+    }
+
     It 'runs only on the schedule or manual dispatch from main' {
         $Workflow | Should -Match '(?m)^\s+schedule:'
         $Workflow | Should -Match '(?m)^\s+workflow_dispatch:'

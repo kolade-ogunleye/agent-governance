@@ -6,6 +6,7 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- Fleet: `kolade-ogunleye/ai-os` (private, Python) is enrolled in `fleet.json`. Its `AGENT_GOVERNANCE_HUB_TOKEN` Actions secret is set; it has no Dependabot configuration, so it needs no Dependabot secret.
 - `Install-ClaudeManagedSettings.ps1 -Verify`: a read-only check of an installed machine policy. It confirms the policy is current, its hook runs the adjacent guard copy, that copy is byte-identical to the hub guard, and only administrators can change the files or their directory. It reports the hub commit and guard SHA-256, so a reviewer can recompute the hash from GitHub, and exits 1 on any failure.
 
 ### Changed
