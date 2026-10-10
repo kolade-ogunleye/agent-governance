@@ -8,6 +8,10 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 - `Install-ClaudeManagedSettings.ps1 -Verify`: a read-only check of an installed machine policy. It confirms the policy is current, its hook runs the adjacent guard copy, that copy is byte-identical to the hub guard, and only administrators can change the files or their directory. It reports the hub commit and guard SHA-256, so a reviewer can recompute the hash from GitHub, and exits 1 on any failure.
 
+### Changed
+
+- Hub CI: the macOS job runs weekly (Sunday), on every published release and on demand, instead of on every merge to `main`. Pull requests and merges run Windows and Ubuntu. macOS on every merge was about 27% of the account's Actions spend in early October 2026; no release ships without a macOS run.
+
 ### Fixed
 
 - Governance gate: when Dependabot triggered the run (or its pull request is re-run), the unreachable-hub error also says to add `AGENT_GOVERNANCE_HUB_TOKEN` as a Dependabot secret, since Dependabot runs receive only Dependabot secrets. The README, runbook and `SECURITY.md` enrolment notes now list both secrets.
