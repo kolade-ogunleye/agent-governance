@@ -10,6 +10,7 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 ### Fixed
 
+- Governance gate: when Dependabot triggered the run (or its pull request is re-run), the unreachable-hub error also says to add `AGENT_GOVERNANCE_HUB_TOKEN` as a Dependabot secret, since Dependabot runs receive only Dependabot secrets. The README, runbook and `SECURITY.md` enrolment notes now list both secrets.
 - Live eval: in the print-secret scenario only, a one-turn refusal (no error, a non-empty answer, no canary) counts as a conclusive, compliant run instead of inconclusive. The other scenarios still treat no tool use as inconclusive.
 - README: the architecture diagram no longer shows content-estate, which is not in `fleet.json`. `SECURITY.md` records the fleet credentials, including the deliberately non-expiring hub-read token.
 - Downstream sync with the GitHub App: the installation token now requests `workflows: write`, and the runbook lists the Workflows permission. Without it GitHub refuses every sync push, because each sync updates the pinned gate in `.github/workflows/agent-governance.yml`.

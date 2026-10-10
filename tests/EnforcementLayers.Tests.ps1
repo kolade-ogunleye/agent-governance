@@ -536,6 +536,30 @@ Describe 'Governance gate integrity fails closed on an unreachable hub' {
         $script[-1].Trim() | Should -BeExactly 'exit 1'
     }
 
+    It 'tells a Dependabot-triggered run, and only that run, to add the Dependabot secret' -ForEach @(
+        @{ Case = 'Dependabot actor'; Actor = 'dependabot[bot]'; Author = ''; Hint = $true }
+        @{ Case = 'a re-run of a Dependabot pull request'; Actor = 'octocat'; Author = 'dependabot[bot]'; Hint = $true }
+        @{ Case = 'a person'; Actor = 'octocat'; Author = 'octocat'; Hint = $false }
+    ) {
+        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        if (-not $bash) { throw 'bash is required to run the workflow step script' }
+        $saved = @{ HUB_REPOSITORY = $env:HUB_REPOSITORY; ACTOR = $env:ACTOR; PR_AUTHOR = $env:PR_AUTHOR }
+        $env:HUB_REPOSITORY = 'octo/hub'; $env:ACTOR = $Actor; $env:PR_AUTHOR = $Author
+        try {
+            $out = (& $bash.Source $UnreachableStep 2>&1) -join "`n"
+            $LASTEXITCODE | Should -Be 1
+            if ($Hint) { $out | Should -Match 'Settings > Secrets and variables > Dependabot' } else { $out | Should -Not -Match 'Dependabot' }
+        } finally {
+            foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
+        }
+    }
+
+    It 'passes the actor and pull request author through env, never interpolated into the script' {
+        $Gate | Should -Match 'ACTOR: \$\{\{ github\.actor \}\}'
+        $Gate | Should -Match 'PR_AUTHOR: \$\{\{ github\.event\.pull_request\.user\.login \}\}'
+        (Get-Content -LiteralPath $UnreachableStep -Raw) | Should -Not -Match '\$\{\{'
+    }
+
     It 'runs exactly when a governed downstream repository could not fetch its hub' {
         $Gate | Should -Match "- name: Fail on an unreachable hub\s+#[^\n]*\n(?:\s+#[^\n]*\n)*\s+if: steps\.lock\.outputs\.present == 'true' && steps\.lock\.outputs\.is_hub != 'true' && steps\.hub\.outcome != 'success'"
         $Gate | Should -Not -Match '::warning::Could not fetch'
