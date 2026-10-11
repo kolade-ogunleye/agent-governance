@@ -12,6 +12,7 @@
 flowchart TD
     Hub["🏛️ Central Governance Hub<br>(agent-governance)"] -->|Sync-AgentGovernance| R1["📦 infosecbyomokolade.com<br>(WordPress / PHP / npm)"]
     Hub -->|Sync-AgentGovernance| R3["📦 hybrid-network-security<br>(Ansible / PowerShell IaC)"]
+    Hub -->|Sync-AgentGovernance| R4["📦 ai-os<br>(Python)"]
     Hub -->|Sync-AgentGovernance| RN["📦 Other Repositories..."]
 
     subgraph HubContent["Canonical Assets & Engine"]
