@@ -5,7 +5,7 @@ BeforeAll {
     $script:Pr = [pscustomobject]@{ number = 7; head = [pscustomobject]@{ sha = 'c' * 40 } }
     $script:GateRef = [pscustomobject]@{ path = "$Hub/.github/workflows/governance-gate.yml@$('a' * 40)"; sha = 'a' * 40 }
 
-    function New-Run {
+    function Get-FakeRun {
         param([string]$Path = '.github/workflows/agent-governance.yml', [object[]]$References = @($GateRef), [hashtable]$Jobs)
         [pscustomobject]@{
             id = Get-Random; path = $Path; referenced_workflows = $References
@@ -26,12 +26,12 @@ BeforeAll {
 
 Describe 'Gate provenance: which run produced the required checks' {
     It 'accepts the required jobs from the caller workflow that calls the hub gate at a commit SHA' {
-        @(Get-GateProvenanceFinding -PullRequest $Pr -Runs @(New-Run -Jobs $GenuineJobs) -Hub $Hub).Count | Should -Be 0
+        @(Get-GateProvenanceFinding -PullRequest $Pr -Runs @(Get-FakeRun -Jobs $GenuineJobs) -Hub $Hub).Count | Should -Be 0
     }
 
     It 'reports a job with a required name from another workflow as spoofed' {
-        $spoof = New-Run -Path '.github/workflows/ci.yml' -References @() -Jobs @{ 'governance / integrity' = 'success' }
-        $f = @(Get-GateProvenanceFinding -PullRequest $Pr -Runs @((New-Run -Jobs $GenuineJobs), $spoof) -Hub $Hub)
+        $spoof = Get-FakeRun -Path '.github/workflows/ci.yml' -References @() -Jobs @{ 'governance / integrity' = 'success' }
+        $f = @(Get-GateProvenanceFinding -PullRequest $Pr -Runs @((Get-FakeRun -Jobs $GenuineJobs), $spoof) -Hub $Hub)
         $f.Kind | Should -Be 'spoofed'
         $f.Job | Should -Be 'governance / integrity'
     }
@@ -41,13 +41,13 @@ Describe 'Gate provenance: which run produced the required checks' {
         @{ Case = 'a fork of the gate'; Refs = @([pscustomobject]@{ path = "evil/agent-governance/.github/workflows/governance-gate.yml@$('a' * 40)" }) }
         @{ Case = 'the gate at a branch, not a SHA'; Refs = @([pscustomobject]@{ path = 'octo/agent-governance/.github/workflows/governance-gate.yml@main' }) }
     ) {
-        $f = @(Get-GateProvenanceFinding -PullRequest $Pr -Runs @(New-Run -References $Refs -Jobs $GenuineJobs) -Hub $Hub)
+        $f = @(Get-GateProvenanceFinding -PullRequest $Pr -Runs @(Get-FakeRun -References $Refs -Jobs $GenuineJobs) -Hub $Hub)
         @($f | Where-Object Kind -eq 'spoofed').Count | Should -Be 2
     }
 
     It 'reports a required job that never passed in a genuine run as missing, not spoofed' {
         $jobs = @{ 'governance / secret-scan' = 'success'; 'governance / integrity' = 'failure' }
-        $f = @(Get-GateProvenanceFinding -PullRequest $Pr -Runs @(New-Run -Jobs $jobs) -Hub $Hub)
+        $f = @(Get-GateProvenanceFinding -PullRequest $Pr -Runs @(Get-FakeRun -Jobs $jobs) -Hub $Hub)
         $f.Kind | Should -Be 'missing'
         $f.Job | Should -Be 'governance / integrity'
     }
@@ -71,7 +71,7 @@ Describe 'Gate provenance: the caller workflow equals the hub template' {
         @{ Case = 'a job is added beside the gate'; Edit = { param($t) $t.TrimEnd() + "`n  spoof:`n    name: governance / integrity`n    runs-on: ubuntu-latest`n    steps:`n      - run: exit 0`n" } }
         @{ Case = 'the gate job is renamed'; Edit = { param($t) $t.Replace("`n  governance:`n", "`n  real:`n") } }
         @{ Case = 'the gate input is pointed at another hub'; Edit = { param($t) $t.Replace("hub_repository: $Hub", 'hub_repository: evil/hub') } }
-        @{ Case = 'the gate is not called at all'; Edit = { param($t) "name: Agent Governance`non: pull_request`njobs: {}`n" } }
+        @{ Case = 'the gate is not called at all'; Edit = { "name: Agent Governance`non: pull_request`njobs: {}`n" } }
         @{ Case = 'the pin names a commit the hub does not have'; Edit = { param($t) $t.Replace($HubCommit, 'f' * 40) } }
     ) {
         $f = Get-CallerFinding -Content (& $Edit $Rendered)
