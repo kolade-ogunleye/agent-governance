@@ -175,7 +175,7 @@ jobs:
           HUB_REPOSITORY: ${{ github.repository }}
         run: |
           $ErrorActionPreference = 'Stop'
-          # macOS runs only after merge (cost), so it cannot be a required pull request check.
+          # macOS runs only weekly, on releases and on demand (cost), so it cannot be a required pull request check.
           $checks = @('governance-gate / secret-scan', 'governance-gate / integrity', 'verify (ubuntu-latest)', 'verify (windows-latest)')
           $result = ./Set-GovernanceRuleset.ps1 -Repository $env:HUB_REPOSITORY -Confirm:$false -RequiredCheck $checks
           Write-Host "$($env:HUB_REPOSITORY): ruleset $($result.Status) $($result.Action)"

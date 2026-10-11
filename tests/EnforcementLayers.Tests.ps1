@@ -316,9 +316,21 @@ Describe 'CI cost controls (Actions minutes)' {
         $text | Should -Match "cancel-in-progress: \`$\{\{ github\.event_name == 'pull_request' \}\}"
     }
 
-    It 'runs the macOS job only after merge, and does not require it on pull requests' {
-        $HubCi | Should -Match "github\.event_name == 'push' && '\[`"windows-latest`", `"ubuntu-latest`", `"macos-latest`"\]' \|\| '\[`"windows-latest`", `"ubuntu-latest`"\]'"
+    # Owner-approved 2026-10-10: macOS moved from every merge to weekly, releases and on demand (cost).
+    It 'runs the macOS job only weekly, on releases and on demand, and does not require it on pull requests' {
+        $HubCi | Should -Match "\(github\.event_name == 'schedule' \|\| github\.event_name == 'release' \|\| github\.event_name == 'workflow_dispatch'\) && '\[`"windows-latest`", `"ubuntu-latest`", `"macos-latest`"\]' \|\| '\[`"windows-latest`", `"ubuntu-latest`"\]'"
         $Fleet | Should -Not -Match "verify \(macos-latest\)'"
+    }
+
+    It 'schedules the weekly macOS run and triggers on published releases and manual dispatch' {
+        $HubCi | Should -Match '(?m)^  schedule:\s*\n\s+- cron: "\d+ \d+ \* \* 0"'
+        $HubCi | Should -Match '(?m)^  release:\s*\n\s+types: \[published\]'
+        $HubCi | Should -Match '(?m)^  workflow_dispatch:'
+    }
+
+    It 'does not put macOS on a pull request or merge to main' {
+        $HubCi | Should -Not -Match "github\.event_name == 'push' &&"
+        $HubCi | Should -Not -Match "github\.event_name == 'pull_request' &&"
     }
 }
 
