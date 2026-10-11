@@ -35,6 +35,19 @@ Describe 'Public readiness of the hub workflows' {
     }
 }
 
+Describe 'Fleet credentials with a public hub' {
+    It 'calls the gate without a hub token: the fleet reads a public hub with its own token' {
+        $caller = Get-Content (Join-Path $RepoRoot 'template' '.github' 'workflows' 'agent-governance.yml') -Raw
+        $caller | Should -Not -Match 'AGENT_GOVERNANCE_HUB_TOKEN'
+        $caller | Should -Not -Match '(?m)^\s+secrets:'
+    }
+
+    It 'still accepts a hub token in the gate, for a hub that is private' {
+        $gate = Get-Content (Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml') -Raw
+        $gate | Should -Match 'token: \$\{\{ secrets\.hub_token \|\| github\.token \}\}'
+    }
+}
+
 Describe 'Public readiness of the hub documentation' {
     It 'does not describe the private fleet repositories'' technology stacks in the README diagram' {
         $readme = Get-Content (Join-Path $RepoRoot 'README.md') -Raw

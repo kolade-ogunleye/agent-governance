@@ -71,7 +71,7 @@ gh run watch --repo kolade-ogunleye/agent-governance
 gh secret delete AGENT_GOVERNANCE_SYNC_TOKEN --repo kolade-ogunleye/agent-governance
 ```
 
-Delete the downloaded `.pem` once the secret is stored. The `AGENT_GOVERNANCE_HUB_TOKEN` secret in each fleet repository (read-only access to the private hub for the integrity job) is unchanged by this step. A fleet repository that uses Dependabot needs the same value stored a second time as a **Dependabot** secret (Settings → Secrets and variables → Dependabot). Dependabot-triggered runs receive only Dependabot secrets, so without it every Dependabot pull request fails `governance / integrity`.
+Delete the downloaded `.pem` once the secret is stored. The fleet repositories need no hub credential: the hub is public, and the integrity job reads it with each repository's own token. (A private hub would need a read-only `AGENT_GOVERNANCE_HUB_TOKEN` passed as the gate's `hub_token`, stored as an Actions secret and, where Dependabot runs, as a Dependabot secret.)
 
 ## C. Fleet follow-up after a hub change merges
 
