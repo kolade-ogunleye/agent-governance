@@ -308,24 +308,20 @@ Describe 'CI cost controls (Actions minutes)' {
         $text | Should -Match "cancel-in-progress: \`$\{\{ github\.event_name == 'pull_request' \}\}"
     }
 
-    # Owner-approved 2026-10-10: macOS moved from every merge to weekly, releases and on demand (cost).
-    It 'runs the macOS job only weekly, on releases and on demand, and does not require it on pull requests' {
-        $HubCi | Should -Match "\(github\.event_name == 'schedule' \|\| github\.event_name == 'release' \|\| github\.event_name == 'workflow_dispatch'\) && '\[`"windows-latest`", `"ubuntu-latest`", `"macos-latest`"\]' \|\| '\[`"windows-latest`", `"ubuntu-latest`"\]'"
+    # Owner-approved 2026-10-11: the hub is public (free minutes), so macOS runs on every pull request and merge
+    # again; it stays out of the required checks so the slowest job never holds up a merge.
+    It 'runs the full matrix, macOS included, on every pull request and merge to main' {
+        $HubCi | Should -Match '(?m)^\s+os: \[windows-latest, ubuntu-latest, macos-latest\]\s*$'
+        $HubCi | Should -Not -Match 'fromJSON\('
+        $HubCi | Should -Match '(?m)^  pull_request:'
+        $HubCi | Should -Match '(?m)^  push:'
+    }
+
+    It 'does not make the macOS job a required check, for the hub or the fleet' {
         $Fleet | Should -Not -Match "verify \(macos-latest\)'"
-    }
-
-    It 'schedules the weekly macOS run and triggers on published releases and manual dispatch' {
-        $HubCi | Should -Match '(?m)^  schedule:\s*\n\s+- cron: "\d+ \d+ \* \* 0"'
-        $HubCi | Should -Match '(?m)^  release:\s*\n\s+types: \[published\]'
-        $HubCi | Should -Match '(?m)^  workflow_dispatch:'
-    }
-
-    It 'does not put macOS on a pull request or merge to main' {
-        $HubCi | Should -Not -Match "github\.event_name == 'push' &&"
-        $HubCi | Should -Not -Match "github\.event_name == 'pull_request' &&"
+        $Fleet | Should -Match "'verify \(ubuntu-latest\)', 'verify \(windows-latest\)'"
     }
 }
-
 Describe 'Default-branch ruleset' {
     BeforeAll {
         $script:RulesetPath = Join-Path $RepoRoot 'rulesets' 'default-branch-protection.json'

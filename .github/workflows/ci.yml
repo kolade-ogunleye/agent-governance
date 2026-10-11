@@ -1,17 +1,13 @@
 name: Governance Engine CI
 
-# Pull requests and merges to main run Windows and Ubuntu, once per push (branch pushes do not trigger a
-# second, duplicate run). macOS bills about 10x Linux per minute, so it runs weekly, on every published
-# release, and on demand (workflow_dispatch): no release ships without it.
+# Pull requests and merges to main run the full matrix (Windows, Ubuntu, macOS), once per push (branch pushes do
+# not trigger a second, duplicate run). The hub is public, so Actions minutes are free. macOS is the slowest job and
+# is not a required check, so it never holds up a merge; a macOS failure still marks main's commit as failed.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  release:
-    types: [published]
-  schedule:
-    - cron: "17 6 * * 0" # Sundays 06:17 UTC
   workflow_dispatch:
 
 # A newer push to the same pull request cancels the superseded run.
@@ -35,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch') && '["windows-latest", "ubuntu-latest", "macos-latest"]' || '["windows-latest", "ubuntu-latest"]') }}
+        os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

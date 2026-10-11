@@ -91,7 +91,7 @@ Ordered from hardest to easiest to bypass:
 
 ## 💸 Actions Minutes
 
-CI runs once per push to a pull request (branch pushes do not trigger a second run), a newer push cancels the superseded run, and the macOS job (about 10x the per-minute cost of Linux) runs weekly (Sunday), on every published release and on demand (`gh workflow run ci.yml`), never on a pull request or merge. A macOS-only regression therefore surfaces within a week, and always before a release. Minutes are spent per push, not per commit: batch commits locally and push once.
+CI runs once per push to a pull request (branch pushes do not trigger a second run), a newer push cancels the superseded run, and, since the hub is public and its Actions minutes are free, the full matrix including macOS runs on every pull request and merge. macOS is not a required check, so the slowest job never holds up a merge. Minutes are spent per push, not per commit: batch commits locally and push once.
 
 ## 📏 Measuring Compliance
 

@@ -11,6 +11,7 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 ### Changed
 
+- Hub CI: with the hub public (free Actions minutes), macOS runs on every pull request and merge again, replacing the weekly, release and on-demand schedule. It is not a required check. Owner-approved, including the updated CI cost-controls test.
 - Hub CI: the macOS job runs weekly (Sunday), on every published release and on demand, instead of on every merge to `main`. Pull requests and merges run Windows and Ubuntu. macOS on every merge was about 27% of the account's Actions spend in early October 2026; no release ships without a macOS run.
 
 ### Fixed
