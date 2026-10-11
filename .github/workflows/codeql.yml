@@ -1,0 +1,36 @@
+name: CodeQL (workflows)
+
+# Code scanning of this repository's GitHub Actions workflows (injection through untrusted inputs, excessive
+# permissions, unpinned actions). Free on public repositories; on a private one it needs GitHub Advanced
+# Security, so the job is skipped while the repository is private.
+# No schedule trigger: a scheduled event carries no repository payload, so the private check below could not tell.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: actions
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3

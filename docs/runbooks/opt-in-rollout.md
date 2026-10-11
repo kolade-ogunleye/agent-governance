@@ -80,6 +80,34 @@ Delete the downloaded `.pem` once the secret is stored. The `AGENT_GOVERNANCE_HU
 3. Confirm enforcement: `./Set-GovernanceRuleset.ps1 -Repository <owner/name> -WhatIf`, or `gh api repos/<owner/name>/rulesets`. On GitHub Pro the ruleset applies to private repositories.
 4. Install the local git gate in each clone that has none: `Sync-AgentGovernance hooks -RepoPath <clone>`.
 
+## E. Making the hub public (engine public, operations private)
+
+Actions minutes are free on public repositories, and a public hub needs no read token in the fleet. Operations stay private: the fleet list, the sync and the provenance audit move to a private `governance-ops` repository. A public repository's workflow logs are public, and GitHub disables its scheduled workflows after 60 days without commits; neither affects a private repository.
+
+What becomes public, permanently (forks and caches outlive a switch back): the engine, templates, guard and its accepted misses, the eval scenarios, and the full history and pull request threads, including older mentions of the fleet repositories' names and stacks. Nothing in the history is a secret (full-history Gitleaks scan, 2026-10-11) and commit emails are GitHub no-reply addresses.
+
+Before the switch (private repositories accept these):
+
+```powershell
+gh api --method PUT repos/<owner>/agent-governance/vulnerability-alerts
+gh api --method PUT repos/<owner>/agent-governance/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
+```
+
+Switch: Settings → General → Danger Zone → Change visibility → Public.
+
+After the switch (public repositories only):
+
+```powershell
+# Workflows on pull requests from forks wait for approval, whoever opens them.
+gh api --method PUT repos/<owner>/agent-governance/actions/permissions/fork-pr-contributor-approval -f approval_policy=all_external_contributors
+gh api --method PUT repos/<owner>/agent-governance/private-vulnerability-reporting
+gh api --method PATCH repos/<owner>/agent-governance --input - <<'EOF'
+{"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}
+EOF
+```
+
+`.github/workflows/codeql.yml` (code scanning of the workflows) starts running by itself once the repository is public; while private it skips.
+
 ## D. Prompt for a local agent
 
 Paste the following to a coding agent that runs on a workstation with the hub cloned and `gh` authenticated. It cannot do the browser steps in B; it stops and asks for the Client ID and the key path.
