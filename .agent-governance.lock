@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hub": {
-    "commit": "d0471ae076feefe1d7c98e538c643e306178cb2a",
+    "commit": "7c4f8d3c3309c494642c4d51a939cf15ac8180ea",
     "dirty": false
   },
   "files": {
@@ -64,7 +64,7 @@
     "scripts/guardrails/verify-governance.ps1":
       "d730fd9526331a7afa5675ed5406108308828af47d9b7a5e1edc264fce2d25b9",
     ".claude/settings.json":
-      "623af7457ecd32b3ae9e0126f199ee20fd2bb51311b9480061b4bc467bbf8d54",
+      "174816a4635121893f635d06243a394a7009972396db915ecf14dda7ee7e196b",
     ".gemini/settings.json":
       "69e6311ed094b0d0623cb1133a56c422a336355499a206395c87e7ccc2801ce7",
     ".codex/config.toml":
