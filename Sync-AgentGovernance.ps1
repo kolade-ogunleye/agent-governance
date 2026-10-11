@@ -773,7 +773,11 @@ fi
         }
 
         $resolvedDir = (Resolve-Path $targetDir).Path
+        # Name the repository after its origin remote, not the checkout folder: CI clones into fixed folder names
+        # (the downstream sync uses "downstream"), and a local clone may be renamed. Fall back to the folder.
         $repoName = Split-Path -Leaf $resolvedDir
+        $originUrl = "$(git -C $resolvedDir remote get-url origin 2>$null)".Trim()
+        if ($originUrl -match '[/\\:]([^/\\:]+?)(?:\.git)?[/\\]*$') { $repoName = $Matches[1] }
 
         Write-Host "`n═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
         Write-Host "📦 Repository: $repoName" -ForegroundColor Cyan
@@ -1052,7 +1056,7 @@ fi
                 $pMd.Add("## 1. Project Overview & Tech Stack")
                 $pMd.Add("")
                 $pMd.Add("- **Repository Name:** $($stack.Name)")
-                $pMd.Add("- **Detected Stack:** $($stack.PrimaryStack)")
+                $pMd.Add("- **Detected Stack:** $(if ($stack.PrimaryStack) { $stack.PrimaryStack } else { 'None detected (no recognised manifest such as package.json, pyproject.toml or requirements.txt); describe the stack here' })")
                 $pMd.Add("- **Frameworks / Platforms:** $(if ($stack.Frameworks) { $stack.Frameworks } else { 'Standard / Native' })")
                 $pMd.Add("- **Package Manager(s):** $(if ($stack.PackageManagers) { $stack.PackageManagers } else { 'None detected' })")
                 $pMd.Add("")

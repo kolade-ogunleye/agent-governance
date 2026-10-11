@@ -144,15 +144,7 @@ Describe 'Governance gate secret-scan range selection' {
         $script:ScanScript = Join-Path $TestDrive 'scan-for-secrets.sh'
         [System.IO.File]::WriteAllText($ScanScript, (Get-WorkflowStepScript -WorkflowPath (Join-Path $RepoRoot '.github' 'workflows' 'governance-gate.yml') -StepName 'Scan for secrets'))
 
-        # Git's own bash on Windows (a bare 'bash' may resolve to WSL); system bash elsewhere.
-        $script:Bash = 'bash'
-        if ($IsWindows) {
-            # git.exe may live in <Git>\cmd or <Git>\mingw64\bin; walk up to the Git root that has bin\bash.exe.
-            $dir = Split-Path -Parent (Get-Command git -CommandType Application | Select-Object -First 1).Source
-            while ($dir -and -not (Test-Path (Join-Path $dir 'bin' 'bash.exe'))) { $dir = Split-Path -Parent $dir }
-            if (-not $dir) { throw 'Git for Windows bash.exe not found.' }
-            $script:Bash = Join-Path $dir 'bin' 'bash.exe'
-        }
+        $script:Bash = Get-TestBash
 
         $script:Repo = New-TestRepo -Path (Join-Path $TestDrive 'scan-repo')
         Add-FixtureCommit -RepoPath $Repo -Files @{ 'a.txt' = "a`n" }
@@ -553,12 +545,11 @@ Describe 'Governance gate integrity fails closed on an unreachable hub' {
         @{ Case = 'a re-run of a Dependabot pull request'; Actor = 'octocat'; Author = 'dependabot[bot]'; Hint = $true }
         @{ Case = 'a person'; Actor = 'octocat'; Author = 'octocat'; Hint = $false }
     ) {
-        $bash = Get-Command bash -ErrorAction SilentlyContinue
-        if (-not $bash) { throw 'bash is required to run the workflow step script' }
+        $bash = Get-TestBash
         $saved = @{ HUB_REPOSITORY = $env:HUB_REPOSITORY; ACTOR = $env:ACTOR; PR_AUTHOR = $env:PR_AUTHOR }
         $env:HUB_REPOSITORY = 'octo/hub'; $env:ACTOR = $Actor; $env:PR_AUTHOR = $Author
         try {
-            $out = (& $bash.Source $UnreachableStep 2>&1) -join "`n"
+            $out = (& $bash $UnreachableStep 2>&1) -join "`n"
             $LASTEXITCODE | Should -Be 1
             if ($Hint) { $out | Should -Match 'Settings > Secrets and variables > Dependabot' } else { $out | Should -Not -Match 'Dependabot' }
         } finally {

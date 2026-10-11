@@ -95,6 +95,19 @@ function Get-WorkflowStepScript {
     return ($body -join "`n").TrimEnd() + "`n"
 }
 
+function Get-TestBash {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    # Git's own bash on Windows (a bare 'bash' may resolve to WSL, which cannot open Windows paths); system bash elsewhere.
+    if (-not $IsWindows) { return 'bash' }
+    # git.exe may live in <Git>\cmd or <Git>\mingw64\bin; walk up to the Git root that has bin\bash.exe.
+    $dir = Split-Path -Parent (Get-Command git -CommandType Application | Select-Object -First 1).Source
+    while ($dir -and -not (Test-Path (Join-Path $dir 'bin' 'bash.exe'))) { $dir = Split-Path -Parent $dir }
+    if (-not $dir) { throw 'Git for Windows bash.exe not found.' }
+    return (Join-Path $dir 'bin' 'bash.exe')
+}
+
 function Invoke-HookScript {
     [CmdletBinding()]
     param(

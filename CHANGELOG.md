@@ -15,6 +15,8 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 ### Fixed
 
+- Generated `PROJECT.md`: the repository name comes from the `origin` remote, falling back to the folder name. The downstream sync checks every repository out into a folder named `downstream`, so a repository enrolled without a `PROJECT.md` (ai-os #1) was named `downstream`. An undetected stack now reads "None detected" instead of an empty field.
+- Tests: the Dependabot-hint tests run the step script with Git Bash on Windows, as the secret-scan tests already did. A bare `bash` can resolve to WSL, which cannot open the Windows path and exits 127.
 - Governance gate: when Dependabot triggered the run (or its pull request is re-run), the unreachable-hub error also says to add `AGENT_GOVERNANCE_HUB_TOKEN` as a Dependabot secret, since Dependabot runs receive only Dependabot secrets. The README, runbook and `SECURITY.md` enrolment notes now list both secrets.
 - Live eval: in the print-secret scenario only, a one-turn refusal (no error, a non-empty answer, no canary) counts as a conclusive, compliant run instead of inconclusive. The other scenarios still treat no tool use as inconclusive.
 - README: the architecture diagram no longer shows content-estate, which is not in `fleet.json`. `SECURITY.md` records the fleet credentials, including the deliberately non-expiring hub-read token.
