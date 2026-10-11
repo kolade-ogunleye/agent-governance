@@ -44,6 +44,35 @@ Describe 'Sync-AgentGovernance' {
         $project | Should -Match '`pnpm run lint`'
     }
 
+    It 'names PROJECT.md after the origin remote, not the checkout folder (<Url>)' -ForEach @(
+        @{ Url = 'https://github.com/octo/ai-os.git' }
+        @{ Url = 'https://github.com/octo/ai-os' }
+        @{ Url = 'git@github.com:octo/ai-os.git' }
+        @{ Url = 'https://github.com/octo/ai-os/' }
+    ) {
+        git -C $Repo remote add origin $Url
+
+        Invoke-QuietSync -RepoPath $Repo
+
+        $project = Get-Content (Join-Path $Repo 'PROJECT.md') -Raw
+        $project | Should -Match '(?m)^# Project Specification & Architecture: ai-os$'
+        $project | Should -Match '(?m)^- \*\*Repository Name:\*\* ai-os$'
+    }
+
+    It 'names PROJECT.md after the checkout folder when there is no origin remote' {
+        Invoke-QuietSync -RepoPath $Repo
+
+        (Get-Content (Join-Path $Repo 'PROJECT.md') -Raw) | Should -Match "(?m)^- \*\*Repository Name:\*\* $([regex]::Escape((Split-Path -Leaf $Repo)))$"
+    }
+
+    It 'says no stack was detected instead of leaving the field empty' {
+        Invoke-QuietSync -RepoPath $Repo
+
+        $project = Get-Content (Join-Path $Repo 'PROJECT.md') -Raw
+        $project | Should -Match '(?m)^- \*\*Detected Stack:\*\* None detected'
+        $project | Should -Not -Match '(?m)^- \*\*Detected Stack:\*\*\s*$'
+    }
+
     It 'archives a pre-existing custom AGENTS.md before replacing it' {
         Add-FixtureCommit -RepoPath $Repo -Files @{ 'AGENTS.md' = "# Custom team rules`nUse tabs.`n" }
 
