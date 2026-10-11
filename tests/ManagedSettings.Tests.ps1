@@ -88,7 +88,7 @@ Describe 'Install-ClaudeManagedSettings.ps1' {
         BeforeAll {
             function Invoke-Verify {
                 param([Parameter(Mandatory = $true)][string]$Dest)
-                $rows = & $Installer -DestinationPath $Dest -Verify
+                $rows = & $Installer -DestinationPath $Dest -Verify 6>$null
                 return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Rows = @($rows) }
             }
             function Get-CheckRow {
@@ -147,6 +147,14 @@ Describe 'Install-ClaudeManagedSettings.ps1' {
             (Get-CheckRow $r 'Guard copy installed*').Passed | Should -BeFalse
             $r.ExitCode | Should -Be 1
             $Dir | Should -Not -Exist
+        }
+
+        It 'prints the report when it fails as a separate process, not only when it passes' {
+            # The documented command is pwsh -File; exit used to end it before the table was formatted.
+            $out = (& pwsh -NoProfile -File $Installer -DestinationPath $Dest -Verify 2>&1) -join "`n"
+            $LASTEXITCODE | Should -Be 1
+            $out | Should -Match 'Policy installed\s+False'
+            $out | Should -Match 'SUMMARY\s+False'
         }
     }
 
