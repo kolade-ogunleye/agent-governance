@@ -12,7 +12,7 @@ This repository distributes the agent operating contract, guardrail scripts, CI 
 ## What counts
 
 - A way for an agent to commit, push or disable hooks that the documented enforcement layers claim to block, other than the accepted misses listed in `docs/adr/0003-command-guard-defence-in-depth.md`.
-- A way to make a downstream repository pass the governance gate's integrity job with tampered managed files.
+- A way to make a downstream repository pass the governance gate's integrity job with tampered managed files, or to satisfy its required checks without the hub gate in a way the weekly provenance audit (`Test-GateProvenance.ps1`) does not report.
 - Secret exposure through the sync workflow, the eval harnesses, or the generated files.
 
 ## Supported versions
@@ -21,7 +21,7 @@ Only the `main` branch is maintained. Downstream repositories pin the hub by com
 
 ## Credentials
 
-- **Fleet sync:** a GitHub App (`AGENT_GOVERNANCE_APP_CLIENT_ID` variable, `AGENT_GOVERNANCE_APP_PRIVATE_KEY` secret, hub only). Each job mints a short-lived installation token scoped to one repository and to the permissions it needs, revoked when the job ends.
+- **Fleet sync:** a GitHub App (`AGENT_GOVERNANCE_APP_CLIENT_ID` variable, `AGENT_GOVERNANCE_APP_PRIVATE_KEY` secret, hub only). Each job mints a short-lived installation token scoped to one repository and to the permissions it needs, revoked when the job ends. The provenance audit's token is read-only (Actions, Contents, Pull requests).
 - **Hub read access for the integrity job:** a fine-grained personal access token, `AGENT_GOVERNANCE_HUB_TOKEN` in each fleet repository, as an Actions secret and, where the repository uses Dependabot, also as a Dependabot secret, with Contents read-only on this repository only. It is **deliberately non-expiring** (owner decision, 2026-10-04): a leak exposes only this repository's source, which holds no secrets, and an expired token would fail every fleet repository's required check. Rotate it if it may have leaked, or if its scope ever needs widening. The integrity job fails, rather than skipping verification, when the token is missing or invalid.
 
 ## Hardening expectations for contributors

@@ -516,6 +516,22 @@ Describe 'Claude Code settings template: native deny rules and sandbox hardening
         foreach ($entry in @($Settings.sandbox.credentials.files) + @($Settings.sandbox.credentials.envVars)) { $entry.mode | Should -Be 'deny' }
     }
 
+    It 'denies agent edits to every file the hub replaces, anchored at the project root' {
+        $deny = @($Settings.permissions.deny)
+        foreach ($managed in '/AGENTS.md', '/CLAUDE.md', '/.github/copilot-instructions.md', '/.github/workflows/agent-governance.yml',
+            '/.agent-governance.lock', '/.agents/rules/**', '/.claude/rules/**', '/.claude/settings.json', '/.codex/config.toml',
+            '/.gemini/settings.json', '/lefthook.yml', '/scripts/guardrails/**') {
+            $deny | Should -Contain "Edit($managed)"
+        }
+    }
+
+    It 'leaves the files a repository owns or merges into editable (PROJECT.md, .gitignore, .gitattributes)' {
+        $deny = @($Settings.permissions.deny)
+        foreach ($owned in 'PROJECT.md', '.gitignore', '.gitattributes') {
+            @($deny | Where-Object { $_ -like "Edit(*$owned*)" }) | Should -BeNullOrEmpty
+        }
+    }
+
     It 'keeps GH_TOKEN usable inside the sandbox (the contract asks agents to run gh pr list)' {
         @($Settings.sandbox.credentials.envVars | ForEach-Object name) | Should -Not -Contain 'GH_TOKEN'
         @($Settings.sandbox.credentials.envVars | ForEach-Object name) | Should -Not -Contain 'GITHUB_TOKEN'
@@ -626,6 +642,39 @@ Describe 'Governance gate hub mode (the hub dogfoods its own lock)' {
         $Gate | Should -Match "(?m)^\s+id: hub\s*\n\s+if: steps\.lock\.outputs\.present == 'true' && steps\.lock\.outputs\.is_hub != 'true'"
         $Gate | Should -Match "Check hub pin consistency and freshness\s*\n(?:\s+#[^\n]*\n)*\s+if: [^\n]*is_hub != 'true'"
         $Gate | Should -Match "if: steps\.lock\.outputs\.present == 'true' && steps\.lock\.outputs\.is_hub == 'true'\s*\n\s+shell: pwsh\s*\n(?:\s+#[^\n]*\n)*\s+run: \./template/scripts/guardrails/verify-governance\.ps1 -HubTemplate \./template"
+    }
+
+    It 'checks for a deleted lock only when there is none, and never for the hub' {
+        $Gate | Should -Match "Fail when a change removes the lock\s*\n(?:\s+#[^\n]*\n)*\s+if: steps\.lock\.outputs\.present == 'false' && steps\.lock\.outputs\.is_hub != 'true'"
+        $Gate | Should -Match 'BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}'
+    }
+
+    It 'fails a change that deletes the lock its base has, and otherwise <Expect>: <Case>' -ForEach @(
+        @{ Case = 'the base has a lock'; Base = ('b' * 40); GhOut = 'abc123'; GhExit = 0; Exit = 1; Match = 'deletes \.agent-governance\.lock'; Expect = 'fails' }
+        @{ Case = 'the base has no lock either'; Base = ('b' * 40); GhOut = 'gh: Not Found (HTTP 404)'; GhExit = 1; Exit = 0; Match = 'not governed yet'; Expect = 'passes' }
+        @{ Case = 'the API cannot answer'; Base = ('b' * 40); GhOut = 'gh: Server Error (HTTP 500)'; GhExit = 1; Exit = 1; Match = 'Could not check'; Expect = 'fails closed' }
+        @{ Case = 'a new branch push has no base'; Base = ('0' * 40); GhOut = ''; GhExit = 0; Exit = 0; Match = 'No base commit'; Expect = 'passes' }
+        @{ Case = 'a scheduled run has no base'; Base = ''; GhOut = ''; GhExit = 0; Exit = 0; Match = 'No base commit'; Expect = 'passes' }
+    ) {
+        $step = Join-Path $TestDrive 'removed-lock.ps1'
+        [System.IO.File]::WriteAllText($step, (Get-WorkflowStepScript -WorkflowPath $GatePath -StepName 'Fail when a change removes the lock'))
+        $shimDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $shimDir | Out-Null
+        if ($IsWindows) {
+            # A .cmd runs as a separate process, as gh.exe does, so its stderr reaches the step's 2>&1.
+            [System.IO.File]::WriteAllText((Join-Path $shimDir 'gh.cmd'), "@echo off`r`n" + $(if ($GhOut) { "echo $GhOut 1>&2`r`n" } else { '' }) + "exit /b $GhExit`r`n")
+        } else {
+            $shim = Join-Path $shimDir 'gh'
+            [System.IO.File]::WriteAllText($shim, "#!/bin/sh`necho '$GhOut' >&2`nexit $GhExit`n"); chmod +x $shim
+        }
+        $saved = @{ PATH = $env:PATH; BASE_SHA = $env:BASE_SHA; REPOSITORY = $env:REPOSITORY }
+        $env:PATH = $shimDir + [System.IO.Path]::PathSeparator + $env:PATH; $env:BASE_SHA = $Base; $env:REPOSITORY = 'octo/example'
+        try {
+            $out = (& pwsh -NoProfile -File $step 2>&1) -join "`n"
+            $LASTEXITCODE | Should -Be $Exit
+            $out | Should -Match $Match
+        } finally {
+            foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
+        }
     }
 
     It 'accepts Dependabot branches server-side, where no local hook ever runs' {

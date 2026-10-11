@@ -49,7 +49,7 @@ What the policy enforces that a project file cannot: bypass mode is off, the den
 
 1. GitHub → Settings → Developer settings → GitHub Apps → New GitHub App.
 2. Name: `agent-governance-sync` (any unused name). Homepage URL: the hub repository URL. Webhook: untick Active.
-3. Repository permissions: Contents (Read and write), Workflows (Read and write: every sync updates the pinned gate in `.github/workflows/agent-governance.yml`, and GitHub refuses that push without it), Pull requests (Read and write), Issues (Read and write, for the label and assignee), Administration (Read and write, for rulesets), Metadata (Read, selected automatically).
+3. Repository permissions: Contents (Read and write), Workflows (Read and write: every sync updates the pinned gate in `.github/workflows/agent-governance.yml`, and GitHub refuses that push without it), Pull requests (Read and write), Issues (Read and write, for the label and assignee), Administration (Read and write, for rulesets), Actions (Read-only, for the weekly provenance audit of merged pull requests), Metadata (Read, selected automatically). After adding a permission to an existing App, accept the updated permissions on its installation (Settings → Applications → Installed GitHub Apps → Configure).
 4. "Where can this GitHub App be installed?": Only on this account. Create the app.
 5. On the app page, note the **Client ID**. Under Private keys, Generate a private key; a `.pem` file downloads.
 6. Install App → your account → Only select repositories → the hub and every repository in `fleet.json`.
