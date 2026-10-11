@@ -131,6 +131,52 @@ jobs:
           $result = ./hub/Set-GovernanceRuleset.ps1 -Repository $env:REPOSITORY -Confirm:$false
           Write-Host "$($env:REPOSITORY): ruleset $($result.Status) $($result.Action)"
 
+  provenance-audit:
+    # Detects, from outside each governed repository, a merged pull request whose required governance checks were
+    # not produced by the hub gate, or whose caller workflow differs from the hub template. Rulesets match checks by
+    # name, and required workflows (which would prevent this) exist only for organizations.
+    needs: plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repository: ${{ fromJSON(needs.plan.outputs.repositories) }}
+    steps:
+      - name: Mint a read-only GitHub App installation token scoped to this repository
+        id: app
+        if: vars.AGENT_GOVERNANCE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AGENT_GOVERNANCE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AGENT_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ matrix.repository.name }}
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+          permission-metadata: read
+
+      - name: Warn when the audit cannot run
+        if: steps.app.outputs.token == ''
+        run: echo "::warning::The provenance audit needs the GitHub App (AGENT_GOVERNANCE_APP_CLIENT_ID / AGENT_GOVERNANCE_APP_PRIVATE_KEY); skipped."
+
+      - name: Checkout hub (full history, to render the caller template at any pinned commit)
+        if: steps.app.outputs.token != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Audit the provenance of required checks on recently merged pull requests
+        if: steps.app.outputs.token != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPOSITORY: ${{ matrix.repository.full }}
+          HUB_REPOSITORY: ${{ github.repository }}
+        run: ./Test-GateProvenance.ps1 -Repository $env:REPOSITORY -HubRepository $env:HUB_REPOSITORY -SinceDays 8
+
   enforce-hub:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

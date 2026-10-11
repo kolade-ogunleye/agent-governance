@@ -136,9 +136,14 @@ if ($Verify) {
     }
 
     $failed = @($checks | Where-Object { -not $_.Passed }).Count
+    $checks.Add([pscustomobject]@{ Check = 'SUMMARY'; Passed = ($failed -eq 0); Detail = "$($checks.Count - $failed)/$($checks.Count) passed; hub $hubCommit; guard sha256 $guardHash" })
     $checks
-    [pscustomobject]@{ Check = 'SUMMARY'; Passed = ($failed -eq 0); Detail = "$($checks.Count - $failed)/$($checks.Count) passed; hub $hubCommit; guard sha256 $guardHash" }
-    if ($failed -gt 0) { exit 1 }
+    if ($failed -gt 0) {
+        # exit ends the script before PowerShell formats pipeline output, so under -File a failing run would print
+        # nothing; render the report to the console first.
+        Write-Host ($checks | Format-Table -AutoSize -Wrap | Out-String -Width 220)
+        exit 1
+    }
     return
 }
 

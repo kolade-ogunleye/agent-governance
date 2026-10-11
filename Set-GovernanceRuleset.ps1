@@ -39,6 +39,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# The GitHub Actions app on github.com: every workflow job's check run carries this app id.
+$GitHubActionsAppId = 15368
+
 function Invoke-GhApi {
     [OutputType([pscustomobject])]
     param([Parameter(Mandatory = $true)][string[]]$GhArgs)
@@ -102,7 +105,9 @@ if ($checks.Count -gt 0) {
             type       = 'required_status_checks'
             parameters = [pscustomobject]@{
                 strict_required_status_checks_policy = $false
-                required_status_checks               = @($checks | ForEach-Object { [pscustomobject]@{ context = $_ } })
+                # Pinned to the GitHub Actions app: a commit status or a check run that another app or a token
+                # posts under the same name does not satisfy the rule.
+                required_status_checks               = @($checks | ForEach-Object { [pscustomobject]@{ context = $_; integration_id = $GitHubActionsAppId } })
             }
         })
 }

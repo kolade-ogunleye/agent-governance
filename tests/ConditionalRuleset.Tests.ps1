@@ -86,6 +86,20 @@ Describe 'Set-GovernanceRuleset.ps1 conditional enforcement' {
         ($body.rules | Where-Object type -eq 'required_status_checks').parameters.strict_required_status_checks_policy | Should -BeFalse
     }
 
+    It 'accepts each required check only from the GitHub Actions app, not from a commit status or another app' {
+        $r = Invoke-RulesetScript -Mode 'with-workflow'
+        $body = Get-Content "$($r.Log).POST.json" -Raw | ConvertFrom-Json
+        $required = @(($body.rules | Where-Object type -eq 'required_status_checks').parameters.required_status_checks)
+        $required.Count | Should -Be 2
+        foreach ($check in $required) { $check.integration_id | Should -Be 15368 }
+    }
+
+    It 'pins explicitly supplied checks to the GitHub Actions app too' {
+        $r = Invoke-RulesetScript -Mode 'no-workflow' -ExtraParams @{ RequiredCheck = @('verify (ubuntu-latest)') }
+        $body = Get-Content "$($r.Log).POST.json" -Raw | ConvertFrom-Json
+        ($body.rules | Where-Object type -eq 'required_status_checks').parameters.required_status_checks.integration_id | Should -Be 15368
+    }
+
     It 'applies without required checks (no deadlock) while the gate workflow is not yet on the default branch' {
         $r = Invoke-RulesetScript -Mode 'no-workflow'
         $r.Result.Status | Should -Be 'applied-without-checks'

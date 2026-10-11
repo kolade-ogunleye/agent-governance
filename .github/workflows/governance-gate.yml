@@ -138,6 +138,34 @@ jobs:
           "present=true" >> $env:GITHUB_OUTPUT
           "commit=$commit" >> $env:GITHUB_OUTPUT
 
+      - name: Fail when a change removes the lock
+        # A repository without a lock is not governed yet, so the gate skips verification. A change that deletes
+        # the lock its base commit has would otherwise skip verification of everything else it changes.
+        if: steps.lock.outputs.present == 'false' && steps.lock.outputs.is_hub != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:BASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:BASE_SHA -match '^0{40}$') {
+              Write-Host "No base commit to compare (new branch, scheduled or manual run)."
+              exit 0
+          }
+          $out = (& gh api "repos/$($env:REPOSITORY)/contents/.agent-governance.lock?ref=$($env:BASE_SHA)" --jq '.sha' 2>&1) -join "`n"
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host "::error::This change deletes .agent-governance.lock, which its base commit $($env:BASE_SHA) has, so managed files cannot be verified. Restore the lock by re-running Sync-AgentGovernance."
+              exit 1
+          }
+          if ($out -match 'HTTP 404') {
+              Write-Host "The base commit has no lock either: this repository is not governed yet."
+              exit 0
+          }
+          # Fail closed: an unanswered question is not a pass.
+          Write-Host "::error::Could not check whether base commit $($env:BASE_SHA) has a lock: $out"
+          exit 1
+
       - name: Checkout hub at the locked commit
         id: hub
         if: steps.lock.outputs.present == 'true' && steps.lock.outputs.is_hub != 'true'
