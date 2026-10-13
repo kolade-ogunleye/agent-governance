@@ -173,8 +173,23 @@ exit 0
 
 Describe 'Downstream sync workflow and fleet list' {
     BeforeAll {
-        $script:Workflow = Get-Content (Join-Path $HubRoot '.github' 'workflows' 'downstream-sync.yml') -Raw
-        $script:Fleet = Get-Content (Join-Path $HubRoot 'fleet.json') -Raw | ConvertFrom-Json
+        $script:WorkflowPath = Join-Path $HubRoot '.github' 'workflows' 'downstream-sync.yml'
+        $script:Workflow = Get-Content $WorkflowPath -Raw
+        $script:PlanStep = Join-Path $TestDrive 'validate-fleet.ps1'
+        [System.IO.File]::WriteAllText($PlanStep, (Get-WorkflowStepScript -WorkflowPath $WorkflowPath -StepName 'Validate the fleet list'))
+
+        function Invoke-PlanStep {
+            param([Parameter(Mandatory = $true)][string]$Fleet)
+            $outputs = Join-Path $TestDrive ("outputs-" + [guid]::NewGuid().ToString('N'))
+            $saved = @{ FLEET = $env:FLEET; HUB_REPOSITORY = $env:HUB_REPOSITORY; GITHUB_OUTPUT = $env:GITHUB_OUTPUT }
+            $env:FLEET = $Fleet; $env:HUB_REPOSITORY = 'octo/agent-governance'; $env:GITHUB_OUTPUT = $outputs
+            try {
+                $out = (& pwsh -NoProfile -File $PlanStep 2>&1) -join "`n"
+                return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $out; Outputs = $(if (Test-Path $outputs) { Get-Content $outputs -Raw } else { '' }) }
+            } finally {
+                foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
+            }
+        }
     }
 
     It 'mints the sync App token with workflows: write, since every sync updates the pinned gate workflow' {
@@ -182,24 +197,43 @@ Describe 'Downstream sync workflow and fleet list' {
         $syncMint | Should -Match 'permission-workflows: write'
     }
 
-    It 'lists owner/name repositories only' {
-        @($Fleet.repositories).Count | Should -BeGreaterThan 0
-        foreach ($r in $Fleet.repositories) { $r | Should -Match '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' }
+    # Owner-approved 2026-10-11: fleet.json moved to the private operations repository, which passes the list in.
+    It 'accepts a fleet list of owner/name repositories and derives the hub name' {
+        $r = Invoke-PlanStep -Fleet '["octo/one","octo/two.site"]'
+        $r.ExitCode | Should -Be 0
+        $r.Outputs | Should -Match 'repositories=\[\{"full":"octo/one","name":"one"\},\{"full":"octo/two.site","name":"two.site"\}\]'
+        $r.Outputs | Should -Match 'hub_name=agent-governance'
     }
 
-    It 'lists each repository once (GitHub names are case-insensitive)' {
-        $names = @($Fleet.repositories | ForEach-Object { $_.ToLowerInvariant() })
-        @($names | Sort-Object -Unique).Count | Should -Be $names.Count
+    It 'rejects a fleet entry that is not owner/name (<Case>)' -ForEach @(
+        @{ Case = 'bare name'; Fleet = '["one"]' }
+        @{ Case = 'extra path segment'; Fleet = '["octo/one/two"]' }
+        @{ Case = 'shell metacharacters'; Fleet = '["octo/one;whoami"]' }
+        @{ Case = 'empty list'; Fleet = '[]' }
+    ) {
+        (Invoke-PlanStep -Fleet $Fleet).ExitCode | Should -Not -Be 0
     }
 
-    It 'runs only on the schedule or manual dispatch from main' {
-        $Workflow | Should -Match '(?m)^\s+schedule:'
-        $Workflow | Should -Match '(?m)^\s+workflow_dispatch:'
-        $Workflow | Should -Not -Match '(?m)^\s+(pull_request|pull_request_target|push):'
+    It 'rejects a repository listed twice (GitHub names are case-insensitive)' {
+        $r = Invoke-PlanStep -Fleet '["octo/one","Octo/One"]'
+        $r.ExitCode | Should -Not -Be 0
+        $r.Output | Should -Match 'Duplicate fleet entry'
+    }
+
+    It 'passes the fleet list to the script through env, never interpolated' {
+        $Workflow | Should -Match 'FLEET: \$\{\{ inputs\.fleet \}\}'
+        $Workflow | Should -Not -Match 'run:[^\n]*\$\{\{ inputs\.fleet'
+    }
+
+    # Owner-approved 2026-10-11: called by the private operations repository at a pinned release commit.
+    It 'runs only when called (workflow_call), from the caller''s main, at the calling hub commit' {
+        $Workflow | Should -Match '(?m)^  workflow_call:'
+        $Workflow | Should -Not -Match '(?m)^\s+(pull_request|pull_request_target|push|schedule|workflow_dispatch):'
         $Workflow | Should -Match "github\.ref == 'refs/heads/main'"
         $Workflow | Should -Match 'Invoke-DownstreamSync\.ps1 -RepoPath downstream -InstallFormatter'
+        $Workflow | Should -Match 'ref: \$\{\{ job\.workflow_sha \}\}'
+        $Workflow | Should -Not -Match 'secrets: inherit'
     }
-
     It 'skips with a warning when the sync token is absent' {
         $Workflow | Should -Match 'AGENT_GOVERNANCE_SYNC_TOKEN'
         $Workflow | Should -Match '::warning::'
