@@ -1,8 +1,0 @@
-{
-  "description": "Downstream repositories that .github/workflows/downstream-sync.yml keeps in sync. Add owner/name entries to enrol more.",
-  "repositories": [
-    "kolade-ogunleye/hybrid-network-security-homelab",
-    "kolade-ogunleye/infosecbyomokolade.com",
-    "kolade-ogunleye/ai-os"
-  ]
-}

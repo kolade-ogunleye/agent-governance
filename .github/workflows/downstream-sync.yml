@@ -1,19 +1,35 @@
 name: Downstream Sync
 
-# Weekly (and on demand) re-sync of every repository in fleet.json, opening or updating one pull request per
-# repository, then applies the default-branch ruleset where the plan supports it (conditional enforcement).
+# Reusable: a private operations repository calls this weekly with its fleet list, pinned to a hub release commit:
+#   jobs.sync.uses: <owner>/agent-governance/.github/workflows/downstream-sync.yml@<release-commit-sha>
+# The hub is public, so its own workflow logs are public. Calling from a private repository keeps fleet names, sync
+# results and audit findings in that repository's private logs, and pinning to a release means hub changes reach the
+# fleet (and run with the App key) only after a release the owner merged into the operations repository.
+# For each repository it re-syncs from the calling hub commit, opening or updating one pull request, applies the
+# default-branch ruleset where the plan supports it, and audits the provenance of recently merged pull requests.
 # Credentials, in order of preference:
-#   1. A GitHub App (variable AGENT_GOVERNANCE_APP_CLIENT_ID + secret AGENT_GOVERNANCE_APP_PRIVATE_KEY): each job mints
-#      a short-lived installation token scoped to the one repository it touches. Install the App on the hub and
-#      the fleet repositories with Contents, Pull requests, Issues (labels, assignees) and Administration
-#      (rulesets) read/write.
+#   1. A GitHub App (input app_client_id + secret AGENT_GOVERNANCE_APP_PRIVATE_KEY): each job mints a short-lived
+#      installation token scoped to the one repository it touches. Install the App on the hub and the fleet
+#      repositories with Contents, Workflows, Pull requests, Issues, Administration read/write and Actions read.
 #   2. The AGENT_GOVERNANCE_SYNC_TOKEN secret: a fine-grained token limited to the hub and the fleet repositories
 #      with the same permissions. Long-lived, so prefer the App.
 # Without either, the jobs warn and skip.
 on:
-  schedule:
-    - cron: "43 5 * * 1"
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      fleet:
+        description: JSON array of owner/name repositories to keep in sync.
+        type: string
+        required: true
+      app_client_id:
+        description: The GitHub App's client ID (not a secret).
+        type: string
+        default: ""
+    secrets:
+      AGENT_GOVERNANCE_APP_PRIVATE_KEY:
+        required: false
+      AGENT_GOVERNANCE_SYNC_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -24,24 +40,30 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       repositories: ${{ steps.fleet.outputs.repositories }}
+      hub_name: ${{ steps.fleet.outputs.hub_name }}
     steps:
-      - name: Checkout hub
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Read fleet.json
+      - name: Validate the fleet list
         id: fleet
         shell: pwsh
+        env:
+          # Via env, never interpolated into the script: the list is caller input.
+          FLEET: ${{ inputs.fleet }}
+          HUB_REPOSITORY: ${{ job.workflow_repository }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $repos = @((Get-Content fleet.json -Raw | ConvertFrom-Json).repositories)
+          $repos = @($env:FLEET | ConvertFrom-Json)
+          if ($repos.Count -eq 0) { throw 'The fleet list is empty.' }
+          $seen = @{}
           $entries = foreach ($r in $repos) {
-              if ($r -notmatch '^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)$') { throw "Invalid fleet entry: $r" }
+              if ("$r" -notmatch '^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)$') { throw "Invalid fleet entry: $r" }
+              # GitHub names are case-insensitive, and a duplicate would open competing sync pull requests.
+              if ($seen.ContainsKey("$r".ToLowerInvariant())) { throw "Duplicate fleet entry: $r" }
+              $seen["$r".ToLowerInvariant()] = $true
               # The App token step needs the bare repository name; the rest of the job uses owner/name.
-              [pscustomobject]@{ full = $r; name = $Matches[2] }
+              [pscustomobject]@{ full = "$r"; name = $Matches[2] }
           }
           "repositories=$(ConvertTo-Json -InputObject @($entries) -Compress)" >> $env:GITHUB_OUTPUT
+          "hub_name=$(($env:HUB_REPOSITORY -split '/')[1])" >> $env:GITHUB_OUTPUT
 
   sync:
     needs: plan
@@ -54,10 +76,10 @@ jobs:
     steps:
       - name: Mint a GitHub App installation token scoped to this repository
         id: app
-        if: vars.AGENT_GOVERNANCE_APP_CLIENT_ID != ''
+        if: inputs.app_client_id != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ vars.AGENT_GOVERNANCE_APP_CLIENT_ID }}
+          client-id: ${{ inputs.app_client_id }}
           private-key: ${{ secrets.AGENT_GOVERNANCE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ matrix.repository.name }}
@@ -83,13 +105,15 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"; echo "source=pat" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"; echo "source=none" >> "$GITHUB_OUTPUT"
-            echo "::warning::Neither a GitHub App (AGENT_GOVERNANCE_APP_CLIENT_ID / AGENT_GOVERNANCE_APP_PRIVATE_KEY) nor AGENT_GOVERNANCE_SYNC_TOKEN is set; skipping downstream sync."
+            echo "::warning::Neither a GitHub App (app_client_id / AGENT_GOVERNANCE_APP_PRIVATE_KEY) nor AGENT_GOVERNANCE_SYNC_TOKEN is set; skipping downstream sync."
           fi
 
-      - name: Checkout hub (full history, so the pinned commit is known to be pushed)
+      - name: Checkout hub at the calling commit (full history, so the pinned commit is known to be pushed)
         if: steps.token.outputs.present == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           fetch-depth: 0
           path: hub
           persist-credentials: false
@@ -145,10 +169,10 @@ jobs:
     steps:
       - name: Mint a read-only GitHub App installation token scoped to this repository
         id: app
-        if: vars.AGENT_GOVERNANCE_APP_CLIENT_ID != ''
+        if: inputs.app_client_id != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ vars.AGENT_GOVERNANCE_APP_CLIENT_ID }}
+          client-id: ${{ inputs.app_client_id }}
           private-key: ${{ secrets.AGENT_GOVERNANCE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ matrix.repository.name }}
@@ -159,12 +183,14 @@ jobs:
 
       - name: Warn when the audit cannot run
         if: steps.app.outputs.token == ''
-        run: echo "::warning::The provenance audit needs the GitHub App (AGENT_GOVERNANCE_APP_CLIENT_ID / AGENT_GOVERNANCE_APP_PRIVATE_KEY); skipped."
+        run: echo "::warning::The provenance audit needs the GitHub App (app_client_id / AGENT_GOVERNANCE_APP_PRIVATE_KEY); skipped."
 
-      - name: Checkout hub (full history, to render the caller template at any pinned commit)
+      - name: Checkout hub at the calling commit (full history, to render the caller template at any pinned commit)
         if: steps.app.outputs.token != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -174,22 +200,23 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPOSITORY: ${{ matrix.repository.full }}
-          HUB_REPOSITORY: ${{ github.repository }}
+          HUB_REPOSITORY: ${{ job.workflow_repository }}
         run: ./Test-GateProvenance.ps1 -Repository $env:REPOSITORY -HubRepository $env:HUB_REPOSITORY -SinceDays 8
 
   enforce-hub:
+    needs: plan
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Mint a GitHub App installation token scoped to the hub
         id: app
-        if: vars.AGENT_GOVERNANCE_APP_CLIENT_ID != ''
+        if: inputs.app_client_id != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ vars.AGENT_GOVERNANCE_APP_CLIENT_ID }}
+          client-id: ${{ inputs.app_client_id }}
           private-key: ${{ secrets.AGENT_GOVERNANCE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
+          repositories: ${{ needs.plan.outputs.hub_name }}
           permission-administration: write
           permission-contents: read
           permission-metadata: read
@@ -207,10 +234,12 @@ jobs:
             echo "::warning::Neither a GitHub App nor AGENT_GOVERNANCE_SYNC_TOKEN is set; skipping hub ruleset enforcement."
           fi
 
-      - name: Checkout hub
+      - name: Checkout hub at the calling commit
         if: steps.token.outputs.present == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
 
       - name: Enforce the hub's default-branch ruleset where the plan supports it
@@ -218,7 +247,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ steps.app.outputs.token || secrets.AGENT_GOVERNANCE_SYNC_TOKEN }}
-          HUB_REPOSITORY: ${{ github.repository }}
+          HUB_REPOSITORY: ${{ job.workflow_repository }}
         run: |
           $ErrorActionPreference = 'Stop'
           # macOS runs on every pull request but is deliberately not required: it is the slowest job and must not hold up merges.
@@ -232,9 +261,11 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout hub
+      - name: Checkout hub at the calling commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
 
       - name: Compare pinned tool versions with the latest releases
@@ -242,4 +273,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./Test-ToolchainFreshness.ps1
-

@@ -52,30 +52,26 @@ What the policy enforces that a project file cannot: bypass mode is off, the den
 3. Repository permissions: Contents (Read and write), Workflows (Read and write: every sync updates the pinned gate in `.github/workflows/agent-governance.yml`, and GitHub refuses that push without it), Pull requests (Read and write), Issues (Read and write, for the label and assignee), Administration (Read and write, for rulesets), Actions (Read-only, for the weekly provenance audit of merged pull requests), Metadata (Read, selected automatically). After adding a permission to an existing App, accept the updated permissions on its installation (Settings → Applications → Installed GitHub Apps → Configure).
 4. "Where can this GitHub App be installed?": Only on this account. Create the app.
 5. On the app page, note the **Client ID**. Under Private keys, Generate a private key; a `.pem` file downloads.
-6. Install App → your account → Only select repositories → the hub and every repository in `fleet.json`.
+6. Install App → your account → Only select repositories → the hub and every repository in the operations repository's fleet list.
 
 ### Agent-runnable steps (gh CLI, authenticated as the account owner)
 
 ```powershell
-# From the hub clone. <client-id> is the value from step 5; <path-to-pem> the downloaded key.
-gh variable set AGENT_GOVERNANCE_APP_CLIENT_ID --repo kolade-ogunleye/agent-governance --body "<client-id>"
-gh secret set AGENT_GOVERNANCE_APP_PRIVATE_KEY --repo kolade-ogunleye/agent-governance < "<path-to-pem>"
+# <client-id> is the value from step 5; <path-to-pem> the downloaded key. The App credentials live in the private
+# operations repository, which calls the hub's reusable sync workflow (section F).
+gh variable set AGENT_GOVERNANCE_APP_CLIENT_ID --repo kolade-ogunleye/governance-ops --body "<client-id>"
+gh secret set AGENT_GOVERNANCE_APP_PRIVATE_KEY --repo kolade-ogunleye/governance-ops < "<path-to-pem>"
 
-# Prove the App path works before retiring the token: run the sync on demand and read the step
-# "Resolve the sync credential", which prints source=app.
-gh workflow run downstream-sync.yml --repo kolade-ogunleye/agent-governance
-gh run watch --repo kolade-ogunleye/agent-governance
-
-# Then retire the personal access token: delete the secret here and revoke the token in
-# Settings → Developer settings → Personal access tokens.
-gh secret delete AGENT_GOVERNANCE_SYNC_TOKEN --repo kolade-ogunleye/agent-governance
+# Prove the App path works: run the sync on demand and read the step "Resolve the sync credential" (source=app).
+gh workflow run sync.yml --repo kolade-ogunleye/governance-ops
+gh run watch --repo kolade-ogunleye/governance-ops
 ```
 
 Delete the downloaded `.pem` once the secret is stored. The fleet repositories need no hub credential: the hub is public, and the integrity job reads it with each repository's own token. (A private hub would need a read-only `AGENT_GOVERNANCE_HUB_TOKEN` passed as the gate's `hub_token`, stored as an Actions secret and, where Dependabot runs, as a Dependabot secret.)
 
 ## C. Fleet follow-up after a hub change merges
 
-1. Dispatch the sync (`gh workflow run downstream-sync.yml`) or wait for the Monday run; one pull request per fleet repository opens.
+1. The fleet receives hub changes only through a release (section F). After the release bump merges in `governance-ops`, dispatch its sync (`gh workflow run sync.yml --repo <owner>/governance-ops`) or wait for the Monday run; one pull request per fleet repository opens.
 2. Review and merge each sync pull request within 30 days (the integrity job warns at 30 and fails at 90).
 3. Confirm enforcement: `./Set-GovernanceRuleset.ps1 -Repository <owner/name> -WhatIf`, or `gh api repos/<owner/name>/rulesets`. On GitHub Pro the ruleset applies to private repositories.
 4. Install the local git gate in each clone that has none: `Sync-AgentGovernance hooks -RepoPath <clone>`.
@@ -108,6 +104,37 @@ EOF
 
 `.github/workflows/codeql.yml` (code scanning of the workflows) starts running by itself once the repository is public; while private it skips.
 
+## F. Releases and the operations repository
+
+The fleet moves only when the hub releases. The private `governance-ops` repository holds the fleet list and a weekly caller pinned to a release commit:
+
+```yaml
+# governance-ops/.github/workflows/sync.yml
+on:
+  schedule: [{ cron: "43 5 * * 1" }]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sync:
+    uses: <owner>/agent-governance/.github/workflows/downstream-sync.yml@<release-commit-sha> # v1.4.0
+    with:
+      fleet: '["<owner>/repo-one", "<owner>/repo-two"]'
+      app_client_id: ${{ vars.AGENT_GOVERNANCE_APP_CLIENT_ID }}
+    secrets:
+      AGENT_GOVERNANCE_APP_PRIVATE_KEY: ${{ secrets.AGENT_GOVERNANCE_APP_PRIVATE_KEY }}
+```
+
+The private key is passed by name, never with `secrets: inherit`, and only to a reviewed release commit: a change merged to the hub's `main` does not run with it until a release is cut and the pin bump is merged in `governance-ops`. Runs, logs and audit findings stay private there.
+
+Cutting a release (every two weeks, or at once for a security fix):
+
+1. Rename `## Unreleased` in `CHANGELOG.md` to `## X.Y.Z - <date>` and add a fresh empty `## Unreleased` above it; merge that pull request.
+2. `gh release create vX.Y.Z --target <merge-commit-sha> --title vX.Y.Z --notes-file <that section>`.
+3. In `governance-ops`, bump the pinned SHA and its `# vX.Y.Z` comment (Dependabot for `github-actions` proposes it) and merge; the next run opens one sync pull request per fleet repository.
+
+A security fix is a patch release (`vX.Y.Z+1`) cut immediately, not held for the next train.
+
 ## D. Prompt for a local agent
 
 Paste the following to a coding agent that runs on a workstation with the hub cloned and `gh` authenticated. It cannot do the browser steps in B; it stops and asks for the Client ID and the key path.
@@ -120,6 +147,6 @@ Section B: ask me for the GitHub App Client ID and the path to the downloaded pr
 variable and secret with gh exactly as the runbook shows, dispatch downstream-sync.yml, wait for it, and show me
 the "Resolve the sync credential" step output. Do not delete AGENT_GOVERNANCE_SYNC_TOKEN until I confirm that
 step printed source=app. Delete the .pem file when the secret is stored.
-Section C: list the sync pull requests the run opened and the ruleset status of every repository in fleet.json.
+Section C: list the sync pull requests the run opened and the ruleset status of every repository in the fleet list.
 Report each step with the command you ran and its result.
 ```
