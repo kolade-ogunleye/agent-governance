@@ -22,7 +22,7 @@ Only the `main` branch is maintained. Downstream repositories pin the hub by com
 ## Credentials
 
 - **Fleet sync:** a GitHub App (`AGENT_GOVERNANCE_APP_CLIENT_ID` variable, `AGENT_GOVERNANCE_APP_PRIVATE_KEY` secret, hub only). Each job mints a short-lived installation token scoped to one repository and to the permissions it needs, revoked when the job ends. The provenance audit's token is read-only (Actions, Contents, Pull requests).
-- **Hub read access for the integrity job:** a fine-grained personal access token, `AGENT_GOVERNANCE_HUB_TOKEN` in each fleet repository, as an Actions secret and, where the repository uses Dependabot, also as a Dependabot secret, with Contents read-only on this repository only. It is **deliberately non-expiring** (owner decision, 2026-10-04): a leak exposes only this repository's source, which holds no secrets, and an expired token would fail every fleet repository's required check. Rotate it if it may have leaked, or if its scope ever needs widening. The integrity job fails, rather than skipping verification, when the token is missing or invalid.
+- **Hub read access for the integrity job:** none. The hub is public (since 2026-10-11), so each fleet repository's integrity job reads it with its own workflow token. The non-expiring `AGENT_GOVERNANCE_HUB_TOKEN` it replaced is to be deleted from every fleet repository (Actions and Dependabot secrets) and revoked. The integrity job still fails, rather than skipping verification, when the hub cannot be fetched.
 
 ## Hardening expectations for contributors
 

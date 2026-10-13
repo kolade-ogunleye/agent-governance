@@ -25,5 +25,3 @@ jobs:
     uses: __HUB_REPOSITORY__/.github/workflows/governance-gate.yml@__HUB_COMMIT__
     with:
       hub_repository: __HUB_REPOSITORY__
-    secrets:
-      hub_token: ${{ secrets.AGENT_GOVERNANCE_HUB_TOKEN }}
