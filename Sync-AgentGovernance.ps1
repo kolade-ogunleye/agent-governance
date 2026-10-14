@@ -154,7 +154,7 @@ function Sync-AgentGovernance {
                 $plan.Add("update  $($file.Target)")
             }
         }
-        foreach ($optional in @('PROJECT.md', '.claude/settings.json', '.gemini/settings.json', '.codex/config.toml', '.agent-governance.lock')) {
+        foreach ($optional in @('PROJECT.md', '.claude/settings.json', '.gemini/settings.json', '.codex/config.toml', '.github/hooks/agent-governance.json', '.agent-governance.lock')) {
             if (-not (Test-Path -LiteralPath (Join-Path $TargetDir $optional))) { $plan.Add("create  $optional") }
         }
         $caller = Get-CallerWorkflow -HubDir $HubDir -RepoDir $TargetDir
@@ -920,11 +920,12 @@ fi
             Copy-Item (Join-Path $hubDir "scripts\guardrails\*") $scriptsDir -Force
 
             # 5b. Agent-native enforcement: Claude Code (deny rules, OS sandbox, Bash guard), Codex (sandbox,
-            # approvals), Gemini CLI (AGENTS.md context, confirmations). Managed while unmodified.
+            # approvals), Gemini CLI (AGENTS.md context, confirmations), Copilot (Bash guard as a preToolUse hook).
+            # Managed while unmodified.
             # The Gemini JSON an earlier engine wrote inline counts as an engine version, not a team edit.
             $legacyGeminiSettings = "{`n  `"context`": {`n    `"fileName`": [`"AGENTS.md`", `"GEMINI.md`"]`n  }`n}`n"
             $managedToolFiles = [System.Collections.Generic.List[string]]::new()
-            foreach ($toolFile in @('.claude/settings.json', '.gemini/settings.json', '.codex/config.toml')) {
+            foreach ($toolFile in @('.claude/settings.json', '.gemini/settings.json', '.codex/config.toml', '.github/hooks/agent-governance.json')) {
                 $legacy = if ($toolFile -eq '.gemini/settings.json') { @($legacyGeminiSettings) } else { @() }
                 $result = Sync-ManagedToolFile -HubDir $hubDir -RepoDir $resolvedDir -RelativePath $toolFile -PreviousLock $previousLock -LegacyContent $legacy
                 switch ($result.Action) {

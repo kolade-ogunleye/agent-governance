@@ -40,6 +40,7 @@
       "Edit(/CLAUDE.md)",
       "Edit(/.github/copilot-instructions.md)",
       "Edit(/.github/workflows/agent-governance.yml)",
+      "Edit(/.github/hooks/agent-governance.json)",
       "Edit(/.agent-governance.lock)",
       "Edit(/.agents/rules/**)",
       "Edit(/.claude/rules/**)",
