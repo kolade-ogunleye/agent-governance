@@ -43,6 +43,17 @@ The first two rely on the output being honest. The third is independent: the gua
 
 What the policy enforces that a project file cannot: bypass mode is off, the deny rules and the guard hook cannot be removed by `.claude/settings.local.json`, and the guard runs from an administrator-only copy rather than the repository's or the hub clone's.
 
+### Codex (admin-enforced requirements)
+
+`Install-CodexRequirements.ps1` does for Codex what this section does for Claude Code: it writes `requirements.toml` (rendered from `managed/codex-requirements.toml`) and a copy of the Bash guard to an administrator-only folder, which Codex enforces over every user and project setting.
+
+| Platform    | Command (from the hub clone)                                                   |
+| :---------- | :----------------------------------------------------------------------------- |
+| Windows     | Elevated PowerShell 7: `pwsh -NoProfile -File .\Install-CodexRequirements.ps1` |
+| Linux, WSL2 | `sudo ~/.local/bin/pwsh -NoProfile -File ./Install-CodexRequirements.ps1`      |
+
+On Windows it also locks `%ProgramData%\OpenAI\Codex` to administrators (ordinary users can create files under `%ProgramData%` by default). Check it without administrator rights with `-Verify`, and confirm Codex loads it with `codex doctor`. Re-run it after each hub release that changes the guard or `managed/codex-requirements.toml`.
+
 ## B. GitHub App for the fleet sync (replaces the personal access token)
 
 ### Human steps (browser)

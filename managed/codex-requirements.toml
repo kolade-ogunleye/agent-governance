@@ -1,0 +1,54 @@
+# Managed by agent-governance: Install-CodexRequirements.ps1 renders this file and installs it, with a copy of the
+# hub's Bash guard, where only administrators can write (%ProgramData%\OpenAI\Codex on Windows, /etc/codex on Linux
+# and WSL). Codex enforces requirements over every user and project setting: they cannot be weakened locally.
+# Scope: the Codex CLI and local Codex work; the IDE extension does not read requirements.
+
+# Never "never" (no approvals) and never danger-full-access (no sandbox).
+allowed_approval_policies = ["untrusted", "on-request"]
+allowed_sandbox_modes = ["read-only", "workspace-write"]
+
+[features]
+# Pinned on, so the guard hook below runs even if a user turns hooks off.
+hooks = true
+
+[permissions.filesystem]
+# Secrets the contract forbids reading. On native Windows this applies to direct file tools, not shell reads.
+deny_read = [
+  "/**/.env",
+  "/**/*.pem",
+  "/**/*.key",
+  "/**/*.p12",
+  "/**/*.pfx",
+  "/**/id_rsa",
+  "/**/id_ed25519",
+  "~/.ssh",
+  "~/.aws",
+  "~/.gnupg",
+]
+
+# Codex reports a hook that errors or times out as a failed hook, not a blocked command, so the most common
+# bypass forms are also forbidden here, where no script is involved. Prefix rules match leading tokens only; the
+# guard hook covers the other spellings.
+[rules]
+prefix_rules = [
+  { pattern = [{ token = "git" }, { token = "commit" }, { token = "--no-verify" }], decision = "forbidden", justification = "agent-governance: hooks must not be bypassed; fix the underlying failure." },
+  { pattern = [{ token = "git" }, { token = "commit" }, { token = "-n" }], decision = "forbidden", justification = "agent-governance: hooks must not be bypassed; fix the underlying failure." },
+  { pattern = [{ token = "git" }, { token = "push" }, { token = "--no-verify" }], decision = "forbidden", justification = "agent-governance: hooks must not be bypassed; fix the underlying failure." },
+  { pattern = [{ token = "lefthook" }, { any_of = ["install", "uninstall"] }], decision = "forbidden", justification = "agent-governance: replaces the fail-closed governance gate." },
+  { pattern = [{ token = "git" }, { token = "config" }, { any_of = ["core.hooksPath", "core.hookspath"] }], decision = "forbidden", justification = "agent-governance: hook-path overrides disable the local gate." },
+  { pattern = [{ token = "git" }, { token = "push" }, { token = "origin" }, { any_of = ["main", "master", "HEAD:main", "HEAD:master"] }], decision = "forbidden", justification = "agent-governance: never push to the default branch; open a pull request." },
+]
+
+[hooks]
+managed_dir = "__HOOKS_DIR_UNIX__"
+windows_managed_dir = '__HOOKS_DIR_WINDOWS__'
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = '"__PWSH_UNIX__" -NoProfile -File "__GUARD_UNIX__"'
+command_windows = '"__PWSH_WINDOWS__" -NoProfile -File "__GUARD_WINDOWS__"'
+timeout = 30
+statusMessage = "agent-governance: checking the command"
