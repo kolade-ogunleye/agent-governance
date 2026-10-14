@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "^(bash|powershell)$",
+        "type": "command",
+        "bash": "pwsh -NoProfile -File \"$(git rev-parse --show-toplevel)/scripts/guardrails/copilot-pretooluse.ps1\"",
+        "powershell": "pwsh -NoProfile -File (Join-Path (git rev-parse --show-toplevel) 'scripts/guardrails/copilot-pretooluse.ps1')",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}
