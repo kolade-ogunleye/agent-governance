@@ -1,0 +1,28 @@
+{
+  "description": "agent-governance deny rules for Google Antigravity (agy). Install-AntigravityPermissions.ps1 merges them into ~/.gemini/antigravity-cli/settings.json; deny wins over ask and allow. __HOME__ is replaced with the user's home directory.",
+  "deny": [
+    "command(regex:.*--no-verif.*)",
+    "command(regex:.*LEFTHOOK(_EXCLUDE)?=.*)",
+    "command(regex:.*lefthook +(un)?install.*)",
+    "command(regex:.*core\\.hooks[Pp]ath.*)",
+    "command(regex:.*GIT_CONFIG_(COUNT|PARAMETERS|GLOBAL|SYSTEM).*)",
+    "command(regex:.*git +push .*(:| |\\+)(refs/heads/)?(main|master)( .*)?)",
+    "read_file(__HOME__/.ssh)",
+    "read_file(__HOME__/.aws)",
+    "read_file(__HOME__/.gnupg)",
+    "write_file(.git/hooks/)",
+    "write_file(.githooks/)",
+    "write_file(.husky/)",
+    "write_file(scripts/guardrails/)",
+    "write_file(.agents/rules/)",
+    "write_file(.claude/)",
+    "write_file(.codex/)",
+    "write_file(.gemini/)",
+    "write_file(.github/hooks/agent-governance.json)",
+    "write_file(.github/workflows/agent-governance.yml)",
+    "write_file(.agent-governance.lock)",
+    "write_file(lefthook.yml)",
+    "write_file(AGENTS.md)",
+    "write_file(CLAUDE.md)"
+  ]
+}
