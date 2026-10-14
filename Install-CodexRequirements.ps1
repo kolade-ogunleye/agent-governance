@@ -44,7 +44,8 @@ function Get-DefaultWindowsDir {
     [OutputType([string])]
     param()
     $programData = if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }
-    return (Join-Path $programData 'OpenAI' 'Codex')
+    # A string, not Join-Path: on Linux and macOS this renders the Windows default, and Join-Path would reject C:.
+    return "$($programData.TrimEnd('\'))\OpenAI\Codex"
 }
 
 function Get-RenderedCodexRequirement {
@@ -61,12 +62,12 @@ function Get-RenderedCodexRequirement {
         $unixDir = "$DefaultUnixDir/hooks"; $unixPwsh = '/usr/bin/pwsh'
     } else {
         $unixDir = $HooksDir; $unixPwsh = $pwsh
-        $winDir = Join-Path (Get-DefaultWindowsDir) 'hooks'; $winPwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+        $winDir = "$(Get-DefaultWindowsDir)\hooks"; $winPwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
     }
     $text = [System.IO.File]::ReadAllText((Join-Path $HubRoot 'managed' 'codex-requirements.toml')) -replace "`r`n", "`n"
     $text = $text.Replace('__HOOKS_DIR_UNIX__', $unixDir).Replace('__HOOKS_DIR_WINDOWS__', $winDir)
     $text = $text.Replace('__PWSH_UNIX__', $unixPwsh).Replace('__PWSH_WINDOWS__', $winPwsh)
-    $text = $text.Replace('__GUARD_UNIX__', "$unixDir/agent-bash-guard.ps1").Replace('__GUARD_WINDOWS__', (Join-Path $winDir 'agent-bash-guard.ps1'))
+    $text = $text.Replace('__GUARD_UNIX__', "$unixDir/agent-bash-guard.ps1").Replace('__GUARD_WINDOWS__', "$($winDir.TrimEnd('\'))\agent-bash-guard.ps1")
     return $text.TrimEnd("`n") + "`n"
 }
 
