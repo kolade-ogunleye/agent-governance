@@ -54,6 +54,14 @@ What the policy enforces that a project file cannot: bypass mode is off, the den
 
 On Windows it also locks `%ProgramData%\OpenAI\Codex` to administrators (ordinary users can create files under `%ProgramData%` by default). Check it without administrator rights with `-Verify`, and confirm Codex loads it with `codex doctor`. Re-run it after each hub release that changes the guard or `managed/codex-requirements.toml`.
 
+### Google Antigravity (user-level deny rules)
+
+Antigravity documents no administrator-enforced policy. `Install-AntigravityPermissions.ps1` merges this hub's deny rules (`managed/antigravity-permissions.json`) into `~/.gemini/antigravity-cli/settings.json`, keeping every other setting; run it as yourself, no elevation, on each machine and in WSL: `pwsh -NoProfile -File ./Install-AntigravityPermissions.ps1`. Check with `-Verify`, remove with `-Remove`. For the Antigravity app, add the same rules under Settings > General > Permission Settings (`-Verify` lists them).
+
+### GitHub Copilot
+
+Nothing to install: every governed repository receives `.github/hooks/agent-governance.json` with the next sync, and Copilot (CLI and cloud agent) loads it from the repository.
+
 ## B. GitHub App for the fleet sync (replaces the personal access token)
 
 ### Human steps (browser)
