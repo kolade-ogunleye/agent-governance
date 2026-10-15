@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hub": {
-    "commit": "a8f0351779a87777d71cead298b376fa14bef8ff",
+    "commit": "74738417132579a440bfff7f045a03a9bc99de96",
     "dirty": false
   },
   "files": {
@@ -53,6 +53,8 @@
       "be5654c37d8db275a09403317119f487192559a7d09589c3a4f49905e65adb79",
     "scripts/guardrails/check-markdown.ps1":
       "51a3ac1537fb3c160e8441d3f213286525e14ad0941a68c2db50869a0fd13b5f",
+    "scripts/guardrails/copilot-pretooluse.ps1":
+      "44f26bfa5e0e4028ef641d7af1724be2e48f107091afd48bdea80816800a25c2",
     "scripts/guardrails/detect-secrets.ps1":
       "5589897d460e02cbcd8064756338367cc7eb56c7de279aa9bfc992d5465a26bf",
     "scripts/guardrails/guard-tests.ps1":
@@ -64,10 +66,12 @@
     "scripts/guardrails/verify-governance.ps1":
       "d730fd9526331a7afa5675ed5406108308828af47d9b7a5e1edc264fce2d25b9",
     ".claude/settings.json":
-      "174816a4635121893f635d06243a394a7009972396db915ecf14dda7ee7e196b",
+      "5211bd67a592ae16d58f036bdc32f72591d9b21092353d403af877f851421f5a",
     ".gemini/settings.json":
       "69e6311ed094b0d0623cb1133a56c422a336355499a206395c87e7ccc2801ce7",
     ".codex/config.toml":
-      "5a30bd9e70d4d235775df23ef32e17963f2670eab4db9f942c79979c1c98db7a"
+      "5a30bd9e70d4d235775df23ef32e17963f2670eab4db9f942c79979c1c98db7a",
+    ".github/hooks/agent-governance.json":
+      "c6c56a6503a7f2972c9fc931c27e592c4d5a2581fc4b8e6d3c4ebe8aeb4c2b61"
   }
 }
