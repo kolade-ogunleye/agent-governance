@@ -4,6 +4,10 @@ All notable changes to the hub are recorded here. The format follows [Keep a Cha
 
 ## Unreleased
 
+### Security
+
+- Codex machine policy: `Install-CodexRequirements.ps1` installs admin-enforced Codex requirements (`%ProgramData%\OpenAI\Codex\requirements.toml`, `/etc/codex/requirements.toml`) with a copy of the Bash guard as a managed `PreToolUse` hook pinned on. They allow no approval-free or unsandboxed modes and no reads of secrets or credential directories, and forbid the hook-bypass, `lefthook install`, `core.hooksPath` and push-to-main commands as command rules, because Codex lets a hook that errors fail open. The Windows folder is locked to administrators. `-Verify` checks it without elevation. The administrator-only check moved to `lib/MachinePolicy.ps1`, shared with the Claude installer.
+
 ## 1.4.0 - 2026-10-13
 
 ### Added
